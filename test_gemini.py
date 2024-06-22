@@ -12,10 +12,10 @@ if __name__ == "__main__":
     from typing import Literal
     from RealtimeSTT import AudioToTextRecorder
     import RealtimeTTS
-    from extern_api import *
     import threading
     import pygame
-
+    from extern_api import *
+    
     keyboard_test_mode = False
     photo_stream_mode = False
 
@@ -47,11 +47,16 @@ if __name__ == "__main__":
     if not keyboard_test_mode:
         recorder = AudioToTextRecorder(**recorder_config)
 
-    eng = RealtimeTTS.CoquiEngine(        
-        voice="download.wav",
-        stream_chunk_size=20,
-        language='zh-CN')
-    #eng.set_emotion('cheerful')
+    eng = RealtimeTTS.AzureEngine(        
+        speech_key=os.environ.get("AZURE_API_KEY"),
+        rate=0.5,
+        voice='zh-CN-YunfengNeural')
+    eng.set_emotion('cheerful')
+
+    # eng = RealtimeTTS.CoquiEngine(        
+    #     voice="download.wav",
+    #     stream_chunk_size=20,
+    #     language='zh-CN')
     stream = RealtimeTTS.TextToAudioStream(eng)
 
     #os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"

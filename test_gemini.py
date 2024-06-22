@@ -15,7 +15,7 @@ if __name__ == "__main__":
     import threading
     import pygame
     from extern_api import *
-    
+
     keyboard_test_mode = False
     photo_stream_mode = False
 
@@ -48,9 +48,10 @@ if __name__ == "__main__":
         recorder = AudioToTextRecorder(**recorder_config)
 
     eng = RealtimeTTS.AzureEngine(        
-        speech_key=os.environ.get("AZURE_API_KEY"),
-        rate=0.5,
-        voice='zh-CN-YunfengNeural')
+        speech_key = os.environ.get("AZURE_API_KEY"),
+        service_region = 'australiaeast',
+        rate = 0.5,
+        voice ='zh-CN-YunfengNeural')
     eng.set_emotion('cheerful')
 
     # eng = RealtimeTTS.CoquiEngine(        

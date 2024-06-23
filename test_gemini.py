@@ -17,13 +17,13 @@ if __name__ == "__main__":
     from extern_api import *
 
     keyboard_test_mode = False
-    photo_stream_mode = False
 
     context = {
         'talk':[],
         'query_response':'',
         'image': None,
-        'photo_file': None
+        'photo_file': None,
+        'continuous_photo_mode': False
     }
 
     keycode = 'Jarvis'
@@ -32,8 +32,8 @@ if __name__ == "__main__":
         'spinner': False,
         'model': 'base',
         'language': 'zh',
-        'silero_sensitivity': 0.2,
-        'webrtc_sensitivity': 1,
+        'silero_sensitivity': 1,
+        'webrtc_sensitivity': 3,
         'post_speech_silence_duration': 0.2,
         'min_length_of_recording': 0.5,
         'min_gap_between_recordings': 0,        
@@ -91,7 +91,7 @@ if __name__ == "__main__":
         while(True):
             clock.tick(24)
             pygame.event.pump()
-            if photo_stream_mode:
+            if context['continuous_photo_mode']:
                 while(not cam.query_image()):
                     pass
                 # capturing the single image 
@@ -107,7 +107,10 @@ if __name__ == "__main__":
     def strip_history():
         if(len(context['talk']) > MAX_HISTORY):
             context['talk'] = context['talk'][len(context['talk']) - MAX_HISTORY :]
-        
+
+    def turn_on_photo_stream_mode(on:bool):
+        context['continuous_photo_mode'] = on
+
     def feed_text(text:str):
         #pass
         if stream.is_playing():
@@ -150,7 +153,7 @@ if __name__ == "__main__":
         context['query_response'] += string_output.getvalue()
         if(string_output.getvalue().strip().endswith('.jpg')):
             image_file = string_output.getvalue().strip()
-            if(not photo_stream_mode):
+            if(not context['continuous_photo_mode']):
                 img = pygame.image.load(image_file).convert()
                 display.blit(img, (0, 0))
                 pygame.display.flip()
@@ -161,7 +164,7 @@ if __name__ == "__main__":
         
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to use a python API, you respond briefly explaining the reason, and put the python code snippet at the end of the response. When you want to get the execution of return value of an API, call attach_to_context(value) on that value, which indicate me to run the code and relay the value to you. You are to answer my questions as short as possible.']},
+    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to use a python API, you respond briefly explaining the reason, and put the python code snippet at the end of the response. When you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to run the code and relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
                 {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
     # save conversation to a log file 
     def append2log(text):
@@ -185,6 +188,7 @@ if __name__ == "__main__":
                         text = recorder.text()
                     
                     print(text)
+                    print('\a')
                     # AI is in sleeping mode
                     if sleeping == True:
                         if keycode.lower() in text.lower():
@@ -219,7 +223,7 @@ if __name__ == "__main__":
 
                 print(f"You: {request}" )
 
-                if photo_stream_mode:
+                if context['continuous_photo_mode']:
                     filename = "camera.jpg"
                     # saving the image 
                     lock.acquire()

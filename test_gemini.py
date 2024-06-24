@@ -51,7 +51,7 @@ if __name__ == "__main__":
         speech_key = os.environ.get("AZURE_API_KEY"),
         service_region = 'australiaeast',
         rate = 0.5,
-        voice ='zh-CN-YunfengNeural')
+        voice ='zh-CN-XiaorouNeural')
     eng.set_emotion('cheerful')
 
     # eng = RealtimeTTS.CoquiEngine(        
@@ -124,8 +124,11 @@ if __name__ == "__main__":
         #print('\a')
 
     def extract_code(input_string:str):
-        start = input_string.find('```python') + 9
-        end = input_string.find('```', start)
+        start = input_string.find('```python')
+        end = -1
+        if(start > 0):
+            start = start + 9
+            end = input_string.find('```', start)
         if start == -1 or end == -1:
             return ''
         return input_string[start:end]
@@ -188,7 +191,8 @@ if __name__ == "__main__":
                         text = recorder.text()
                     
                     print(text)
-                    print('\a')
+                    if(text != ''):
+                        print('\a')
                     # AI is in sleeping mode
                     if sleeping == True:
                         if keycode.lower() in text.lower():

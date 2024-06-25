@@ -14,6 +14,7 @@ if __name__ == "__main__":
     import RealtimeTTS
     import threading
     import pygame
+    import keyboard
     from extern_api import *
 
     keyboard_test_mode = False
@@ -179,17 +180,27 @@ if __name__ == "__main__":
     def main():
         sleeping = False 
 
+        evtEnter = threading.Event()
+        evtExit = threading.Event()
+        keydown = keyboard.add_hotkey('space', lambda: evtEnter.set(), suppress=True, trigger_on_release=False)
+        keyup = keyboard.add_hotkey('space', lambda: evtExit.set(), suppress=True, trigger_on_release=True)
         #feed_text(f"My name is {keycode}")
         speak()
+
         while True:
-            print("Listening ...")
             try: 
                 if(context['query_response'] == ''):
                     if keyboard_test_mode:
                         text = input('Input:')
                     else:
-                        text = recorder.text()
-                    
+                        evtEnter.wait()
+                        print("Listening ...")
+                        print('\a')
+                        recorder.start()
+                        evtExit.wait()
+                        evtEnter.clear()
+                        evtExit.clear()
+                        text = recorder.stop().text()
                     print(text)
                     if(text != ''):
                         print('\a')

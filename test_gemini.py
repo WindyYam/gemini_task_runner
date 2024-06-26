@@ -14,8 +14,10 @@ if __name__ == "__main__":
     import RealtimeTTS
     import threading
     import pygame
+    import pygame.camera
     import keyboard
     from extern_api import *
+    import langdetect
 
     keyboard_test_mode = False
 
@@ -31,8 +33,8 @@ if __name__ == "__main__":
 
     recorder_config = {
         'spinner': False,
-        'model': 'base',
-        'language': 'zh',
+        'model': 'small',
+        'language': '',
         'silero_sensitivity': 1,
         'webrtc_sensitivity': 3,
         'post_speech_silence_duration': 0.2,
@@ -48,17 +50,22 @@ if __name__ == "__main__":
     if not keyboard_test_mode:
         recorder = AudioToTextRecorder(**recorder_config)
 
-    eng = RealtimeTTS.AzureEngine(        
-        speech_key = os.environ.get("AZURE_API_KEY"),
-        service_region = 'australiaeast',
-        rate = 0.5,
-        voice ='zh-CN-XiaorouNeural')
-    eng.set_emotion('cheerful')
+    # eng = RealtimeTTS.AzureEngine(        
+    #     speech_key = os.environ.get("AZURE_API_KEY"),
+    #     service_region = 'australiaeast',
+    #     rate = 0.5,
+    #     voice ='zh-CN-XiaorouNeural')
+    # eng.set_emotion('cheerful')
 
-    # eng = RealtimeTTS.CoquiEngine(        
-    #     voice="download.wav",
-    #     stream_chunk_size=20,
-    #     language='zh-CN')
+    eng = RealtimeTTS.CoquiEngine(   
+        voice='RA.wav',
+        #voice='coqui_Damien Black.wav',
+        #voice='record.wav',
+        specific_model='v2.0.3',
+        stream_chunk_size=40,
+        speed=1.1,
+        pretrained=True,
+        language='zh')
     stream = RealtimeTTS.TextToAudioStream(eng)
 
     #os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
@@ -80,9 +87,22 @@ if __name__ == "__main__":
     #    genai.delete_file(item)
 
     pygame.init()
+    # initializing  the camera 
+    pygame.camera.init() 
+
+    # make the list of all available cameras 
+    camlist = pygame.camera.list_cameras() 
+
+    img_size = (420, 240)
+
+    if camlist: 
+        # initializing the cam variable with default camera 
+        cam = pygame.camera.Camera(camlist[0], img_size) 
+
+    on_sound = pygame.mixer.Sound("sonar.mp3")
+    off_sound = pygame.mixer.Sound("droplet.mp3")
 
     display = None
-
     
     lock = threading.Lock()
     def event_thread():
@@ -110,7 +130,23 @@ if __name__ == "__main__":
             context['talk'] = context['talk'][len(context['talk']) - MAX_HISTORY :]
 
     def turn_on_photo_stream_mode(on:bool):
+        cam.start()
         context['continuous_photo_mode'] = on
+
+    def camera()->str:
+        # opening the camera 
+        if not context['continuous_photo_mode']:
+            cam.start() 
+        while(not cam.query_image()):
+            pass
+        # capturing the single image 
+        image = cam.get_image() 
+        if not context['continuous_photo_mode']:
+            cam.stop()
+        photo_name = "camera.jpg"
+        # saving the image 
+        pygame.image.save(image, photo_name)
+        return photo_name
 
     def feed_text(text:str):
         #pass
@@ -121,13 +157,13 @@ if __name__ == "__main__":
         #eng.synthesize(text)
 
     def speak():
-        stream.play_async(sentence_fragment_delimiters = ".?!;:,\n…)]}。-？，")
+        stream.play_async(sentence_fragment_delimiters = ".?!;,\n…{[())]}。-？，")
         #print('\a')
 
     def extract_code(input_string:str):
         start = input_string.find('```python')
         end = -1
-        if(start > 0):
+        if(start >= 0):
             start = start + 9
             end = input_string.find('```', start)
         if start == -1 or end == -1:
@@ -168,7 +204,7 @@ if __name__ == "__main__":
         
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to use a python API, you respond briefly explaining the reason, and put the python code snippet at the end of the response. When you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to run the code and relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
+    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to use a python API, you respond briefly explaining the reason, and put the code you want as code snippet at the end of the response. When you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to run the code and relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
                 {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
     # save conversation to a log file 
     def append2log(text):
@@ -181,10 +217,13 @@ if __name__ == "__main__":
         sleeping = False 
 
         evtEnter = threading.Event()
-        evtExit = threading.Event()
-        keydown = keyboard.add_hotkey('space', lambda: evtEnter.set(), suppress=True, trigger_on_release=False)
-        keyup = keyboard.add_hotkey('space', lambda: evtExit.set(), suppress=True, trigger_on_release=True)
+        def btn():
+            evtEnter.set()
+        keyboard.add_hotkey(-179, btn, suppress=True, trigger_on_release=False)
+        keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
+        #keyup = keyboard.add_hotkey(-179, lambda: evtExit.set(), suppress=True, trigger_on_release=True)
         #feed_text(f"My name is {keycode}")
+        print('\a')
         speak()
 
         while True:
@@ -194,12 +233,13 @@ if __name__ == "__main__":
                         text = input('Input:')
                     else:
                         evtEnter.wait()
-                        print("Listening ...")
-                        print('\a')
-                        recorder.start()
-                        evtExit.wait()
                         evtEnter.clear()
-                        evtExit.clear()
+                        print("Listening ...")
+                        pygame.mixer.Sound.play(on_sound)
+                        recorder.start()
+                        evtEnter.wait()
+                        evtEnter.clear()
+                        pygame.mixer.Sound.play(off_sound)
                         text = recorder.stop().text()
                     print(text)
                     if(text != ''):
@@ -288,6 +328,13 @@ if __name__ == "__main__":
                     thread.start()
 
                 if (not keyboard_test_mode) and (voice_text != ''):
+                    lang = langdetect.detect(voice_text)
+                    if('en' in lang):
+                        lang = 'en'
+                    else:
+                        lang = 'zh'
+                    print(lang)
+                    eng.language = lang
                     feed_text(voice_text)
                     speak()
 

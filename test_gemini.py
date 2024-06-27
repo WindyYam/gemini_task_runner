@@ -224,7 +224,7 @@ if __name__ == "__main__":
             evtEnter.set()
         #-179 is the play/pause media key
         keyboard.add_hotkey(-179, btn, suppress=True, trigger_on_release=False)
-        #keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
+        keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
         #keyup = keyboard.add_hotkey(-179, lambda: evtExit.set(), suppress=True, trigger_on_release=True)
         feed_text(f"My name is {keycode}, how can I help you?")
         print('\a')
@@ -236,16 +236,16 @@ if __name__ == "__main__":
                     if keyboard_test_mode:
                         text = input('Input:')
                     else:
-                        #evtEnter.wait()
+                        evtEnter.wait()
                         evtEnter.clear()
                         print("Listening ...")
                         pygame.mixer.Sound.play(on_sound)
-                        #recorder.start()
-                        text = input()
-                        #evtEnter.wait()
+                        recorder.start()
+                        #text = input()
+                        evtEnter.wait()
                         evtEnter.clear()
                         pygame.mixer.Sound.play(off_sound)
-                        #text = recorder.stop().text()
+                        text = recorder.stop().text()
                     print(text)
                     if(text != ''):
                         print('\a')

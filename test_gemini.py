@@ -19,6 +19,7 @@ if __name__ == "__main__":
     from extern_api import *
     import langdetect
 
+    MAX_HISTORY = 40
     keyboard_test_mode = False
 
     context = {
@@ -65,7 +66,10 @@ if __name__ == "__main__":
         stream_chunk_size=40,
         speed=1.1,
         pretrained=True,
-        language='zh')
+        comma_silence_duration=0.2,
+        sentence_silence_duration=0.4,
+        default_silence_duration=0.2,
+        language='en')
     stream = RealtimeTTS.TextToAudioStream(eng)
 
     #os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
@@ -124,16 +128,15 @@ if __name__ == "__main__":
 
     threading.Thread(target=event_thread).start()
 
-    MAX_HISTORY = 20
     def strip_history():
         if(len(context['talk']) > MAX_HISTORY):
             context['talk'] = context['talk'][len(context['talk']) - MAX_HISTORY :]
 
-    def turn_on_photo_stream_mode(on:bool):
+    def photo_stream_mode(on:bool):
         cam.start()
         context['continuous_photo_mode'] = on
 
-    def camera()->str:
+    def capture()->str:
         # opening the camera 
         if not context['continuous_photo_mode']:
             cam.start() 
@@ -204,7 +207,7 @@ if __name__ == "__main__":
         
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to use a python API, you respond briefly explaining the reason, and put the code you want as code snippet at the end of the response. When you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to run the code and relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
+    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to execute a python API, put the code you want to execute as python snippet at the end of the response. If you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
                 {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
     # save conversation to a log file 
     def append2log(text):
@@ -219,10 +222,11 @@ if __name__ == "__main__":
         evtEnter = threading.Event()
         def btn():
             evtEnter.set()
+        #-179 is the play/pause media key
         keyboard.add_hotkey(-179, btn, suppress=True, trigger_on_release=False)
-        keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
+        #keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
         #keyup = keyboard.add_hotkey(-179, lambda: evtExit.set(), suppress=True, trigger_on_release=True)
-        #feed_text(f"My name is {keycode}")
+        feed_text(f"My name is {keycode}, how can I help you?")
         print('\a')
         speak()
 
@@ -232,15 +236,16 @@ if __name__ == "__main__":
                     if keyboard_test_mode:
                         text = input('Input:')
                     else:
-                        evtEnter.wait()
+                        #evtEnter.wait()
                         evtEnter.clear()
                         print("Listening ...")
                         pygame.mixer.Sound.play(on_sound)
-                        recorder.start()
-                        evtEnter.wait()
+                        #recorder.start()
+                        text = input()
+                        #evtEnter.wait()
                         evtEnter.clear()
                         pygame.mixer.Sound.play(off_sound)
-                        text = recorder.stop().text()
+                        #text = recorder.stop().text()
                     print(text)
                     if(text != ''):
                         print('\a')
@@ -331,6 +336,10 @@ if __name__ == "__main__":
                     lang = langdetect.detect(voice_text)
                     if('en' in lang):
                         lang = 'en'
+                    elif('ja' in lang):
+                        lang = 'ja'
+                    elif('kn' in lang):
+                        lang = 'kn'
                     else:
                         lang = 'zh'
                     print(lang)

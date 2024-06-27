@@ -1,4 +1,5 @@
-#This file contains python APIs to be used in code snippet for execution
+# This file contains python APIs to be used in code snippet for execution
+# To execute the code, put the code in python code snippet in the response
 
 import requests
 from bs4 import BeautifulSoup
@@ -109,7 +110,7 @@ def bingSearch(query:str)->str:
 # attach_to_context(value)      instruct me to attach the value information to you
 # photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False
 # capture()                     for capturing the photo through your eye. this return the photo name. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(photo_name) in the code snippet to instruct me to upload that photo to you
-# mimic_my_voice()              for if I ask you to mimic my voice, call this in snippet
-# default_voice()               for switching back to default voice, call this in snippet
+# switch_user_voice()           for voice system switching to user voice to mimic the user's voice
+# switch_default_voice()        for voice system switching back to default voice
 
 # important! To get the information returned by python APIs, use attach_to_context() instead of print(), which indicate me to run the code then relay the information to you

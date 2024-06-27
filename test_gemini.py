@@ -208,7 +208,7 @@ if __name__ == "__main__":
                                     display_name="photo")
         string_output.close()
     
-    def mimic_my_voice():
+    def switch_user_voice():
         samplerate = 16000
         audio = (recorder.audio * (2 ** 15 - 1)).astype("<h")
         with wave.open(MIMIC_VOICE, "w") as f:
@@ -224,12 +224,12 @@ if __name__ == "__main__":
         eng.set_voice(voice=MIMIC_VOICE[:-4])
         # # let the AI use new voice
     
-    def default_voice():
+    def switch_default_voice():
         eng.set_voice(voice=DEFAULT_VOICE[:-4])
 
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to execute a python API, put the code you want to execute as python snippet at the end of the response. If you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the existing APIs if I want you to do something. You are to answer my questions as short as possible, and always in a humorous way.']},
+    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.']},
                 {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
     # save conversation to a log file 
     def append2log(text):

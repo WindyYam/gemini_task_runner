@@ -82,16 +82,11 @@ if __name__ == "__main__":
     for m in genai.list_models():
         if 'generateContent' in m.supported_generation_methods:
             print(m.name)
-    # model of Google Gemini API
-    model = genai.GenerativeModel(model_name='gemini-1.5-flash')
-    files = genai.list_files()
-    for item in files:
+
+    lists = genai.list_files()
+    for item in lists:
         print(item.name)
-        genai.delete_file(item.name)
-    #lists = genai.list_files()
-    #for item in lists:
-    #    print(item.name)
-    #    genai.delete_file(item)
+        genai.delete_file(item)
 
     pygame.init()
     # initializing  the camera 
@@ -229,8 +224,11 @@ if __name__ == "__main__":
 
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.']},
-                {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
+    talk_header = [{'role': 'user', 'parts': [function_file, 'This is the python APIs you can execute. To execute them, put them in python code snippet at the end of your response']},
+                {'role': 'model', 'parts': [f"Understood, I'll remember to always check this file for available API calls to execute.\n"]}]
+    # model of Google Gemini API
+    model = genai.GenerativeModel(model_name='gemini-1.5-flash', system_instruction=[f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.'])
+    
     # save conversation to a log file 
     def append2log(text):
         fname = 'chatlog-' + today + '.txt'

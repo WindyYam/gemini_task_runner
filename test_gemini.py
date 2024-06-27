@@ -18,9 +18,12 @@ if __name__ == "__main__":
     import keyboard
     from extern_api import *
     import langdetect
+    import wave
 
     MAX_HISTORY = 40
     keyboard_test_mode = False
+    DEFAULT_VOICE = 'RA.wav'
+    MIMIC_VOICE = 'mimic.wav'
 
     context = {
         'talk':[],
@@ -59,9 +62,7 @@ if __name__ == "__main__":
     # eng.set_emotion('cheerful')
 
     eng = RealtimeTTS.CoquiEngine(   
-        voice='RA.wav',
-        #voice='coqui_Damien Black.wav',
-        #voice='record.wav',
+        voice=DEFAULT_VOICE,
         specific_model='v2.0.3',
         stream_chunk_size=40,
         speed=1.1,
@@ -71,7 +72,6 @@ if __name__ == "__main__":
         default_silence_duration=0.2,
         language='en')
     stream = RealtimeTTS.TextToAudioStream(eng)
-
     #os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
     # set the Google Gemini API key as a system environment variable or add it here
@@ -84,7 +84,10 @@ if __name__ == "__main__":
             print(m.name)
     # model of Google Gemini API
     model = genai.GenerativeModel(model_name='gemini-1.5-flash')
-
+    files = genai.list_files()
+    for item in files:
+        print(item.name)
+        genai.delete_file(item.name)
     #lists = genai.list_files()
     #for item in lists:
     #    print(item.name)
@@ -204,10 +207,29 @@ if __name__ == "__main__":
             context['photo_file'] = genai.upload_file(path=image_file,
                                     display_name="photo")
         string_output.close()
-        
+    
+    def mimic_my_voice():
+        samplerate = 16000
+        audio = (recorder.audio * (2 ** 15 - 1)).astype("<h")
+        with wave.open(MIMIC_VOICE, "w") as f:
+            # 1 Channels.
+            f.setnchannels(1)
+            # 2 bytes per sample.
+            f.setsampwidth(2)
+            f.setframerate(samplerate)
+            f.writeframes(audio)
+        mimic_latent = MIMIC_VOICE[:-4]+'.json'
+        if os.path.exists(mimic_latent):
+            os.remove(mimic_latent)
+        eng.set_voice(voice=MIMIC_VOICE[:-4])
+        # # let the AI use new voice
+    
+    def default_voice():
+        eng.set_voice(voice=DEFAULT_VOICE[:-4])
+
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
-    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to execute a python API, put the code you want to execute as python snippet at the end of the response. If you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. You are to answer my questions as short as possible, and always in a humorous way.']},
+    talk_header = [{'role': 'user', 'parts': [function_file, f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. When you confirm to execute a python API, put the code you want to execute as python snippet at the end of the response. If you want to get the execution of return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the existing APIs if I want you to do something. You are to answer my questions as short as possible, and always in a humorous way.']},
                 {'role': 'model', 'parts': [f"Understood., I'm {keycode}, your loyal assistant. I'll be concise. I can see the world by taking photo and attach to the context.\n"]}]
     # save conversation to a log file 
     def append2log(text):

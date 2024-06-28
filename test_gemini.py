@@ -24,7 +24,7 @@ if __name__ == "__main__":
     keyboard_test_mode = False
     DEFAULT_VOICE = 'RA.wav'
     MIMIC_VOICE = 'mimic.wav'
-    TRUMP_VOICE = 'trump2.wav'
+    TRUMP_VOICE = 'trump3.wav'
     BIDEN_VOICE = 'biden.wav'
     VADER_VOICE = 'vader.wav'
 
@@ -275,7 +275,7 @@ if __name__ == "__main__":
             evtEnter.set()
         #-179 is the play/pause media key
         keyboard.add_hotkey(-179, btn, suppress=True, trigger_on_release=False)
-        #keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
+        keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
         #keyup = keyboard.add_hotkey(-179, lambda: evtExit.set(), suppress=True, trigger_on_release=True)
         feed_text(f"I'm {keycode}, how can I help you?")
         print('\a')
@@ -287,16 +287,16 @@ if __name__ == "__main__":
                     if keyboard_test_mode:
                         text = input('Input:')
                     else:
-                        #evtEnter.wait()
+                        evtEnter.wait()
                         evtEnter.clear()
                         print("Listening ...")
                         on_sound.play()
-                        #recorder.start()
-                        text = input()
-                        #evtEnter.wait()
+                        recorder.start()
+                        #text = input()
+                        evtEnter.wait()
                         evtEnter.clear()
                         off_sound.play()
-                        #text = recorder.stop().text()
+                        text = recorder.stop().text()
                     print(text)
                     if(text != ''):
                         print('\a')

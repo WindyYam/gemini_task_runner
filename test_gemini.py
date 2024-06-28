@@ -26,6 +26,7 @@ if __name__ == "__main__":
     MIMIC_VOICE = 'mimic.wav'
     TRUMP_VOICE = 'trump2.wav'
     BIDEN_VOICE = 'biden.wav'
+    VADER_VOICE = 'vader.wav'
 
     context = {
         'talk':[],
@@ -105,6 +106,8 @@ if __name__ == "__main__":
 
     on_sound = pygame.mixer.Sound("sonar.mp3")
     off_sound = pygame.mixer.Sound("droplet.mp3")
+    vader_breath = pygame.mixer.Sound("breathing.mp3")
+    vader_breath.set_volume(0.25)
 
     display = None
     
@@ -206,6 +209,7 @@ if __name__ == "__main__":
         string_output.close()
     
     def switch_user_voice():
+        vader_breath.stop()
         samplerate = 16000
         audio = (recorder.audio * (2 ** 15 - 1)).astype("<h")
         with wave.open(MIMIC_VOICE, "w") as f:
@@ -221,14 +225,21 @@ if __name__ == "__main__":
         eng.set_voice(voice=MIMIC_VOICE[:-4])
         # # let the AI use new voice
     
-    def switch_default_role():
+    def revert_default_role():
+        vader_breath.stop()
         eng.set_voice(voice=DEFAULT_VOICE[:-4])
 
     def switch_trump_role():
+        vader_breath.stop()
         eng.set_voice(voice=TRUMP_VOICE[:-4])
     
     def switch_biden_role():
+        vader_breath.stop()
         eng.set_voice(voice=BIDEN_VOICE[:-4])
+
+    def switch_vader_role():
+        vader_breath.play(-1)
+        eng.set_voice(voice=VADER_VOICE[:-4])
 
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
@@ -279,12 +290,12 @@ if __name__ == "__main__":
                         #evtEnter.wait()
                         evtEnter.clear()
                         print("Listening ...")
-                        pygame.mixer.Sound.play(on_sound)
+                        on_sound.play()
                         #recorder.start()
                         text = input()
                         #evtEnter.wait()
                         evtEnter.clear()
-                        pygame.mixer.Sound.play(off_sound)
+                        off_sound.play()
                         #text = recorder.stop().text()
                     print(text)
                     if(text != ''):

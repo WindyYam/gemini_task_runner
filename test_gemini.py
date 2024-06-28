@@ -24,6 +24,8 @@ if __name__ == "__main__":
     keyboard_test_mode = False
     DEFAULT_VOICE = 'RA.wav'
     MIMIC_VOICE = 'mimic.wav'
+    TRUMP_VOICE = 'trump2.wav'
+    BIDEN_VOICE = 'biden.wav'
 
     context = {
         'talk':[],
@@ -219,15 +221,33 @@ if __name__ == "__main__":
         eng.set_voice(voice=MIMIC_VOICE[:-4])
         # # let the AI use new voice
     
-    def switch_default_voice():
+    def switch_default_role():
         eng.set_voice(voice=DEFAULT_VOICE[:-4])
+
+    def switch_trump_role():
+        eng.set_voice(voice=TRUMP_VOICE[:-4])
+    
+    def switch_biden_role():
+        eng.set_voice(voice=BIDEN_VOICE[:-4])
 
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
     talk_header = [{'role': 'user', 'parts': [function_file, 'This is the python APIs you can execute. To execute them, put them in python code snippet at the end of your response']},
                 {'role': 'model', 'parts': [f"Understood, I'll remember to always check this file for available API calls to execute.\n"]}]
     # model of Google Gemini API
-    model = genai.GenerativeModel(model_name='gemini-1.5-flash', system_instruction=[f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system, the python function API and information API and the usage description you can interact with is in the uploaded file. To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.'])
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
+    model = genai.GenerativeModel(model_name='gemini-1.5-flash', safety_settings={
+                                        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                    },
+                                  system_instruction=[f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. \
+                                                                                     Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system. \
+                                                                                     The python function API and information API and the usage description you can interact with is in the uploaded python file. \
+                                                                                     To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. \
+                                                                                     If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. \
+                                                                                     Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.'])
     
     # save conversation to a log file 
     def append2log(text):
@@ -244,9 +264,9 @@ if __name__ == "__main__":
             evtEnter.set()
         #-179 is the play/pause media key
         keyboard.add_hotkey(-179, btn, suppress=True, trigger_on_release=False)
-        keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
+        #keyboard.add_hotkey('space', btn, suppress=True, trigger_on_release=False)
         #keyup = keyboard.add_hotkey(-179, lambda: evtExit.set(), suppress=True, trigger_on_release=True)
-        feed_text(f"My name is {keycode}, how can I help you?")
+        feed_text(f"I'm {keycode}, how can I help you?")
         print('\a')
         speak()
 
@@ -256,16 +276,16 @@ if __name__ == "__main__":
                     if keyboard_test_mode:
                         text = input('Input:')
                     else:
-                        evtEnter.wait()
+                        #evtEnter.wait()
                         evtEnter.clear()
                         print("Listening ...")
                         pygame.mixer.Sound.play(on_sound)
-                        recorder.start()
-                        #text = input()
-                        evtEnter.wait()
+                        #recorder.start()
+                        text = input()
+                        #evtEnter.wait()
                         evtEnter.clear()
                         pygame.mixer.Sound.play(off_sound)
-                        text = recorder.stop().text()
+                        #text = recorder.stop().text()
                     print(text)
                     if(text != ''):
                         print('\a')
@@ -341,6 +361,7 @@ if __name__ == "__main__":
                     print(chunk_text, end='')
 
                 print('')
+
                 all_text = response.text
                 pythoncode = extract_code(response.text)
                 voice_text = strip_code(all_text)

@@ -110,7 +110,9 @@ def bingSearch(query:str)->str:
 # attach_to_context(value)      instruct me to attach the value information to you
 # photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False
 # capture()                     for capturing the photo through your eye. this return the photo name. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(photo_name) in the code snippet to instruct me to upload that photo to you
-# switch_user_voice()           for voice system switching to user voice to mimic the user's voice
-# switch_default_voice()        for voice system switching back to default voice
+# switch_user_voice()           for voice system switching to user voice to mimic the user's voice tone
+# switch_trump_role()           for voice system switching to Donald Trump's voice tone. After this call, you would be Donald Trump as well
+# switch_biden_role()           for voice system switching to Joe Biden's voice tone. After this call, you would be Joe Biden as well
+# switch_default_role()         for voice system switching back to default voice and your are back to your assistant role
 
 # important! To get the information returned by python APIs, use attach_to_context() instead of print(), which indicate me to run the code then relay the information to you

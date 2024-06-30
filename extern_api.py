@@ -51,17 +51,12 @@ def setFanSpeed(speed:int):
     ser.write(data.encode())
 
 ##########################################################
-# APIs for getting information
+# APIs for getting information that you don't know
 # At the end, to get the information, you should use attach_to_context(value) on the returned value, I'll then send the value to you
 ##########################################################
 # check for all house smart appliance status
 def getHouseStatus()->str:
     return json.dumps(house)
-
-def getDateTIme()->str:
-    now = datetime.now()
-    dt_string = now.strftime("%H:%M:%S %d/%B/%Y")
-    return dt_string
 
 # get the current city name
 def getCity()->str:
@@ -107,7 +102,7 @@ def bingSearch(query:str)->str:
 # time                          for time.
 # sched                         for scheduling.
 # request                       for http request.
-# attach_to_context(value)      instruct me to attach the value information to you.
+# attach_to_context(value)      force me to attach the value information to you at next request.
 # photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False. When it is set on, be aware that you don't need attach_to_context() for the photo
 # capture()                     for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
 # switch_user_voice()           for voice system switching to user voice to mimic the user's voice tone only, and your personality keeps unchanged.
@@ -117,4 +112,4 @@ def bingSearch(query:str)->str:
 # switch_vader_role()           for voice system switching to Darth Vader's voice tone. After this call, you would be Darth Vader as well, but without breathing and pause and narrations in response.
 # revert_default_role()         for voice system reverting back to default voice and role.
 
-# important! To get the information returned by python APIs, use attach_to_context() instead of print(), which indicate me to run the code then relay the information to you.
+# important! To get the information returned by python APIs, use attach_to_context() instead of print(), which forces me to run the code then relay the information to you.

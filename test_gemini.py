@@ -119,7 +119,6 @@ if __name__ == "__main__":
         display = pygame.display.set_mode(img_size, 0)
         while(True):
             clock.tick(24)
-            pygame.event.pump()
             if context['continuous_photo_mode']:
                 while(not cam.query_image()):
                     pass
@@ -129,6 +128,9 @@ if __name__ == "__main__":
                 lock.release()
                 display.blit(context['image'], (0,0))
                 pygame.display.flip()
+            else:
+                pygame.event.wait()
+            pygame.event.pump()
 
     threading.Thread(target=event_thread).start()
 
@@ -254,6 +256,8 @@ if __name__ == "__main__":
                                     display_name="Python API")
     talk_header = [{'role': 'user', 'parts': [function_file, 'This is the python APIs you can execute. To execute them, put them in python code snippet at the end of your response']},
                 {'role': 'model', 'parts': [f"Understood, I'll remember to always check this file for available API calls to execute.\n"]}]
+    now = datetime.now()
+    dt_string = now.strftime("%d/%B/%Y")
     # model of Google Gemini API
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
     model = genai.GenerativeModel(model_name='gemini-1.5-flash', safety_settings={
@@ -262,11 +266,12 @@ if __name__ == "__main__":
                                         HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
                                         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
                                     },
-                                  system_instruction=[f'Remember, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. \
+                                  system_instruction=[f'Remember, today is {dt_string}, your name is {keycode}, a well educated assistant with character, have great knowledge on everything. \
                                                                                      Keep in mind that you are my AI assistant, with voice synthesis output from response text as part of the system. \
+                                                                                     The input system will always attach a timestamp for your reference. \
                                                                                      The python function API and information API and the usage description you can interact with is in the uploaded python file. \
                                                                                      To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. \
-                                                                                     If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. \
+                                                                                     If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which forces me to relay the value to you. \
                                                                                      Be sure to always check the matching snippet APIs before generating response. You are to answer questions as short as possible, and always in a humorous way.'])
     
     # save conversation to a log file 
@@ -345,8 +350,6 @@ if __name__ == "__main__":
                     request = context['query_response']
                     context['query_response'] = ''
 
-                print(f"You: {request}" )
-
                 if context['continuous_photo_mode']:
                     filename = "camera.jpg"
                     # saving the image 
@@ -359,15 +362,19 @@ if __name__ == "__main__":
                 temp = talk_header + context['talk']
                 
                 new_item = None
+                now = datetime.now()
+                dt_string = now.strftime("%H:%M:%S")
                 if context['photo_file']:
-                    new_item = {'role':'user', 'parts':[context['photo_file'], request]} 
+                    new_item = {'role':'user', 'parts':[context['photo_file'], request, dt_string]} 
                     context['photo_file'] = None
                 else:
-                    new_item = {'role':'user', 'parts':[request]}
+                    new_item = {'role':'user', 'parts':[request, dt_string]}
                 
                 context['talk'].append(new_item)
 
                 temp.append(new_item)
+
+                print(f"You: {new_item['parts']}" )
                 
                 # to make sure always be pair in conversation
                 reply = {'role':'model', 'parts':['']}
@@ -425,7 +432,7 @@ if __name__ == "__main__":
                 strip_history()
                 #print(talk)           
 
-                append2log(f"You: {request}\n ")
+                append2log(f"You: {new_item['parts']}\n ")
                 append2log(f"AI: {all_text} \n")
 
             except Exception as e:

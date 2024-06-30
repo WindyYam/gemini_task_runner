@@ -27,6 +27,7 @@ if __name__ == "__main__":
     TRUMP_VOICE = 'trump3.wav'
     BIDEN_VOICE = 'biden.wav'
     VADER_VOICE = 'vader.wav'
+    ROBOT_VOICE = 'goliath.wav'
 
     context = {
         'talk':[],
@@ -107,7 +108,7 @@ if __name__ == "__main__":
     on_sound = pygame.mixer.Sound("sonar.mp3")
     off_sound = pygame.mixer.Sound("droplet.mp3")
     vader_breath = pygame.mixer.Sound("breathing.mp3")
-    vader_breath.set_volume(0.25)
+    vader_breath.set_volume(0.1)
 
     display = None
     
@@ -136,28 +137,32 @@ if __name__ == "__main__":
             context['talk'] = context['talk'][len(context['talk']) - MAX_HISTORY :]
 
     def photo_stream_mode(on:bool):
-        cam.start()
-        context['continuous_photo_mode'] = on
+        if(on):
+            cam.start()
+            context['continuous_photo_mode'] = True
+        else:
+            context['continuous_photo_mode'] = False
+            cam.stop()
+        
 
     def capture()->str:
         # opening the camera 
         if not context['continuous_photo_mode']:
             cam.start() 
-        while(not cam.query_image()):
-            pass
-        # capturing the single image 
-        image = cam.get_image() 
-        if not context['continuous_photo_mode']:
+            while(not cam.query_image()):
+                pass
+            time.sleep(0.1)
+            # capturing the single image 
+            image = cam.get_image() 
             cam.stop()
-        photo_name = "camera.jpg"
-        # saving the image 
-        pygame.image.save(image, photo_name)
-        return photo_name
+            photo_name = "camera.jpg"
+            # saving the image 
+            pygame.image.save(image, photo_name)
+            return photo_name
+        else:
+            return ''
 
     def feed_text(text:str):
-        #pass
-        if stream.is_playing():
-            stream.stop()
         text = text.replace('*', ' ')
         stream.feed(text)
         #eng.synthesize(text)
@@ -196,8 +201,8 @@ if __name__ == "__main__":
             flush: Literal[False] = False,):
         string_output = io.StringIO()
         print(*values, file=string_output, sep=sep, end=end, flush=flush)
-        context['query_response'] += string_output.getvalue()
-        if(string_output.getvalue().strip().endswith('.jpg')):
+        context['query_response'] = string_output.getvalue().strip()
+        if(context['query_response'].endswith('.jpg')):
             image_file = string_output.getvalue().strip()
             if(not context['continuous_photo_mode']):
                 img = pygame.image.load(image_file).convert()
@@ -240,6 +245,10 @@ if __name__ == "__main__":
     def switch_vader_role():
         vader_breath.play(-1)
         eng.set_voice(voice=VADER_VOICE[:-4])
+    
+    def switch_robot_role():
+        vader_breath.stop()
+        eng.set_voice(voice=ROBOT_VOICE[:-4])
 
     function_file = genai.upload_file(path="extern_api.py",
                                     display_name="Python API")
@@ -258,7 +267,7 @@ if __name__ == "__main__":
                                                                                      The python function API and information API and the usage description you can interact with is in the uploaded python file. \
                                                                                      To execute the python code, put the code as python snippet at the end of the response, then any code in the snippet in response will be executed. \
                                                                                      If you want to get the return value of an API, call attach_to_context(value) on that value in the code snippet, which indicate me to relay the value to you. \
-                                                                                     Be sure to always check the matching APIs if you take an order. You are to answer questions as short as possible, and always in a humorous way.'])
+                                                                                     Be sure to always check the matching snippet APIs before generating response. You are to answer questions as short as possible, and always in a humorous way.'])
     
     # save conversation to a log file 
     def append2log(text):
@@ -308,16 +317,20 @@ if __name__ == "__main__":
                             # start a new conversation 
                             append2log(f"_"*40)
                         else:
+                            stream.feed('I am deactivated.')
+                            stream.play_async()
                             continue
                         
                     # AI is awake         
-                    request = text.lower().strip()
+                    request = text.strip()
                     if(len(request) <= 1):
                         continue
-                    if ("that's all" in request) or ("see you" in request) or ("bye" in request):
+                    request_low = request.lower()
+                    if ("that's all" in request_low) or ("see you" in request_low) or ("bye" in request_low):
                                                 
                         append2log(f"You: {request}\n")
-                        
+                        revert_default_role()
+
                         feed_text("OK, see you soon.")
                         speak()
 
@@ -376,6 +389,10 @@ if __name__ == "__main__":
                 all_text = response.text
                 pythoncode = extract_code(response.text)
                 voice_text = strip_code(all_text)
+
+                if voice_text != '':
+                    if stream.is_playing():
+                        stream.stop()
 
                 thread = None
                 if(pythoncode != ''):

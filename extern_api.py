@@ -60,7 +60,7 @@ def getHouseStatus()->str:
 
 def getDateTIme()->str:
     now = datetime.now()
-    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+    dt_string = now.strftime("%H:%M:%S %d/%B/%Y")
     return dt_string
 
 # get the current city name
@@ -108,11 +108,12 @@ def bingSearch(query:str)->str:
 # sched                         for scheduling.
 # request                       for http request.
 # attach_to_context(value)      instruct me to attach the value information to you.
-# photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False.
-# capture()                     for capturing the photo through your eye. this return the photo name. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(photo_name) in the code snippet to instruct me to upload that photo to you.
+# photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False. When it is set on, be aware that you don't need attach_to_context() for the photo
+# capture()                     for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
 # switch_user_voice()           for voice system switching to user voice to mimic the user's voice tone only, and your personality keeps unchanged.
 # switch_trump_role()           for voice system switching to Donald Trump's voice tone. After this call, you would be Donald Trump as well.
 # switch_biden_role()           for voice system switching to Joe Biden's voice tone. After this call, you would be Joe Biden as well.
+# switch_robot_role()           for voice system switching to a robot's voice tone. After this call, you would behave like a robot, but without pause and noise sound in response.
 # switch_vader_role()           for voice system switching to Darth Vader's voice tone. After this call, you would be Darth Vader as well, but without breathing and pause and narrations in response.
 # revert_default_role()         for voice system reverting back to default voice and role.
 

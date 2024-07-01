@@ -97,19 +97,20 @@ def bingSearch(query:str)->str:
     return json.dumps(search_results)
 
 ##########################################################
-# apart from the above APIs, you also get access to the following python library:
-# datetime                      for datetime.
-# time                          for time.
-# sched                         for scheduling.
-# request                       for http request.
-# attach_to_context(value)      force me to attach the value information to you at next request.
-# photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False. When it is set on, be aware that you don't need attach_to_context() for the photo
-# capture_photo()               for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
-# switch_user_voice()           for voice system switching to user voice to mimic the user's voice tone only, and your personality keeps unchanged.
-# switch_trump_role()           for voice system switching to Donald Trump's voice tone. After this call, you would be Donald Trump as well.
-# switch_biden_role()           for voice system switching to Joe Biden's voice tone. After this call, you would be Joe Biden as well.
-# switch_robot_role()           for voice system switching to a robot's voice tone. After this call, you would behave like a robot, but without pause and noise sound in response.
-# switch_vader_role()           for voice system switching to Darth Vader's voice tone. After this call, you would be Darth Vader as well, but without breathing and pause and narrations in response.
-# revert_default_role()         for voice system reverting back to default voice and role.
+# apart from the above APIs, you also get access to the following python library/API:
+# datetime                          for datetime.
+# time                              for time.
+# request                           for http request.
+# attach_to_context(value)          force me to attach the value information to you at next request.
+# photo_stream_mode(on)             for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False. When it is set on, be aware that you don't need attach_to_context() for the photo
+# capture_photo()                   for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
+# switch_user_voice()               for voice system switching to user voice to mimic the user's voice tone only, and your personality keeps unchanged.
+# switch_trump_role()               for voice system switching to Donald Trump's voice tone. After this call, you would be Donald Trump as well.
+# switch_biden_role()               for voice system switching to Joe Biden's voice tone. After this call, you would be Joe Biden as well.
+# switch_robot_role()               for voice system switching to a robot's voice tone. After this call, you would behave like a robot, but without pause and noise sound in response.
+# switch_vader_role()               for voice system switching to Darth Vader's voice tone. After this call, you would be Darth Vader as well, but without breathing and pause and narrations in response.
+# revert_default_role()             for voice system reverting back to default voice and role.
+# schedule(delay, callback, arg=()) for scheduling a function callback, delay is the delay time from now, arg is the argument for the callback
+# play_alarm_sound()                for playing an alarm sound
 
 # important! To get the information returned by python APIs, use attach_to_context() instead of print(), which forces me to run the code then relay the information to you.

@@ -11,6 +11,7 @@ if __name__ == "__main__":
     from voice_recognition import VoiceRecognition
     from text_to_speech import TextToSpeech
     from extern_api import *
+    import sched
 
     MAX_HISTORY = 40
     keyboard_test_mode = False
@@ -23,8 +24,13 @@ if __name__ == "__main__":
         'photo_file': None,
         'continuous_photo_mode': False,
         'attach_to_context_in_a_row': 0,
-        'today':''
     }
+
+    pygame.init()
+    pygame.camera.init()
+    scheduler = sched.scheduler(time.time, time.sleep)
+    alarm = pygame.mixer.Sound("alarm.mp3")
+    today = str(date.today())
 
     instruction = [
         f'Remember, today is {datetime.now().strftime("%d/%B/%Y")}, your name is {keycode}, '
@@ -38,7 +44,7 @@ if __name__ == "__main__":
     ]
 
     def append2log(text):
-        fname = 'chatlog-' + context['today'] + '.txt'
+        fname = 'chatlog-' + today + '.txt'
         with open(fname, "a", encoding='utf8') as f:
             f.write(text + "\n")
 
@@ -47,9 +53,6 @@ if __name__ == "__main__":
             end: str | None = "\n",
             flush: Literal[False] = False):
         string_output = io.StringIO()
-        context['attach_to_context_in_a_row'] = context['attach_to_context_in_a_row'] + 1
-        if(context['attach_to_context_in_a_row'] >= 4):
-            return
         print(*values, file=string_output, sep=sep, end=end, flush=flush)
         context['query_response'] = string_output.getvalue().strip()
         if context['query_response'].endswith('.jpg'):
@@ -98,7 +101,8 @@ if __name__ == "__main__":
         # Set up display
         display = pygame.display.set_mode(img_size, 0)
         while True:
-            clock.tick(24)
+            clock.tick(10)
+            scheduler.run(blocking=False)
             if context['continuous_photo_mode']:
                 while not cam.query_image():
                     pass
@@ -107,9 +111,10 @@ if __name__ == "__main__":
                 lock.release()
                 display.blit(context['image'], (0, 0))
                 pygame.display.flip()
-            else:
-                pygame.event.wait()
             pygame.event.pump()
+
+    def schedule(delay, callback, argument=()):
+        scheduler.enter(delay, 1, callback, argument)
 
     def switch_user_voice():
         text_to_speech.switch_user_voice(voice_recognition.recorder)
@@ -129,13 +134,11 @@ if __name__ == "__main__":
     def switch_robot_role():
         text_to_speech.switch_robot_role()
 
+    def play_alarm_sound():
+        alarm.play(2)
+
     def main():
         global context, gemini_ai, voice_recognition, text_to_speech, lock, cam
-
-        context['today'] = str(date.today())
-
-        pygame.init()
-        pygame.camera.init()
 
         gemini_ai = GeminiAI(name=keycode, system_instruction=instruction)
         voice_recognition = VoiceRecognition()
@@ -161,15 +164,15 @@ if __name__ == "__main__":
 
         # Main loop
         sleeping = False
-
+        attach_to_context_in_a_row = 0
         print('\a')
         text_to_speech.speak(f"I'm {keycode}, how can I help you?")
         append2log('==================New=====================')
         try:
             while True:
                 try:
-                    if context['query_response'] == '':
-                        context['attach_to_context_in_a_row'] = 0
+                    if context['query_response'] == '' or attach_to_context_in_a_row >= 3:
+                        attach_to_context_in_a_row = 0
                         text = voice_recognition.listen() if not keyboard_test_mode else input('Input: ')
 
                         if sleeping and keycode.lower() in text.lower():
@@ -185,6 +188,7 @@ if __name__ == "__main__":
                             continue
 
                     else:
+                        attach_to_context_in_a_row += 1
                         text = context['query_response']
                         context['query_response'] = ''
 
@@ -202,7 +206,7 @@ if __name__ == "__main__":
                         parts.append(context['photo_file'])
                     parts.append(text)
                     timestamp = datetime.now().strftime("%H:%M:%S")
-                    parts.append(timestamp)
+                    parts.append(f'*{timestamp}*')
 
                     temp = talk_header + context['talk']
                     temp.append({'role': 'user', 'parts': parts})

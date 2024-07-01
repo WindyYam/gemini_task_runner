@@ -104,7 +104,7 @@ def bingSearch(query:str)->str:
 # request                       for http request.
 # attach_to_context(value)      force me to attach the value information to you at next request.
 # photo_stream_mode(on)         for turning on/off continuous photo capture & upload mode on every talk to you, arg is True/False. When it is set on, be aware that you don't need attach_to_context() for the photo
-# capture()                     for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
+# capture_photo()               for capturing the photo through your eye. this return the photo instance. when I instruct you to look, you can look and see, by taking a photo. To get that photo file, put attach_to_context(capture()) in the code snippet to instruct me to upload that photo to you.
 # switch_user_voice()           for voice system switching to user voice to mimic the user's voice tone only, and your personality keeps unchanged.
 # switch_trump_role()           for voice system switching to Donald Trump's voice tone. After this call, you would be Donald Trump as well.
 # switch_biden_role()           for voice system switching to Joe Biden's voice tone. After this call, you would be Joe Biden as well.

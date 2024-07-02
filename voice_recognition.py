@@ -19,16 +19,13 @@ class VoiceRecognition:
         self.on_sound = pygame.mixer.Sound("sonar.mp3")
         self.off_sound = pygame.mixer.Sound("droplet.mp3")
         self.evt_enter = threading.Event()
-        self._setup_keyboard_triggers()
-
-    def _setup_keyboard_triggers(self):
-        keyboard.add_hotkey(-179, self._trigger_button, suppress=True, trigger_on_release=False)
-        keyboard.add_hotkey('space', self._trigger_button, suppress=True, trigger_on_release=False)
-
+        
     def _trigger_button(self):
         self.evt_enter.set()
 
     def listen(self):
+        keyboard.add_hotkey(-179, self._trigger_button, suppress=True, trigger_on_release=False)
+        keyboard.add_hotkey('space', self._trigger_button, suppress=True, trigger_on_release=False)
         print("Waiting for trigger...")
         self.evt_enter.wait()
         self.evt_enter.clear()
@@ -42,9 +39,7 @@ class VoiceRecognition:
         
         self.off_sound.play()
         text = self.recorder.stop().text()
-        return text
 
-    def cleanup(self):
-        # Remove hotkeys when the object is destroyed
         keyboard.remove_hotkey(-179)
         keyboard.remove_hotkey('space')
+        return text

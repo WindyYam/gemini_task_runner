@@ -14,7 +14,7 @@ if __name__ == "__main__":
     import sched
 
     MAX_HISTORY = 40
-    keyboard_test_mode = False
+    keyboard_test_mode = True
     keycode = 'Jarvis'
 
     context = {
@@ -29,7 +29,9 @@ if __name__ == "__main__":
     pygame.init()
     pygame.camera.init()
     scheduler = sched.scheduler(time.time, time.sleep)
-    alarm = pygame.mixer.Sound("alarm.mp3")
+    alarm_sound = pygame.mixer.Sound("alarm.mp3")
+    code_sound = pygame.mixer.Sound("code.mp3")
+    event_sound = pygame.mixer.Sound("event.mp3")
     today = str(date.today())
 
     instruction = [
@@ -92,6 +94,7 @@ if __name__ == "__main__":
     def exec_code(code:str):
         try:
             d = dict(locals(), **globals())
+            code_sound.play()
             exec(code, d, d)
         except Exception as e:
             print("Code exec exception: ", e)
@@ -113,8 +116,12 @@ if __name__ == "__main__":
                 pygame.display.flip()
             pygame.event.pump()
 
-    def schedule(delay, callback, argument=()):
-        scheduler.enter(delay, 1, callback, argument)
+    def callback_wrapper(cb, arg=()):
+        event_sound.play()
+        cb(*arg)
+
+    def schedule(delay, cb, arg=()):
+        scheduler.enter(delay, 1, callback_wrapper, argument=(cb, arg))
 
     def switch_user_voice():
         text_to_speech.switch_user_voice(voice_recognition.recorder)
@@ -135,7 +142,10 @@ if __name__ == "__main__":
         text_to_speech.switch_robot_role()
 
     def play_alarm_sound():
-        alarm.play(2)
+        alarm_sound.play(2)
+    
+    def play_text_voice(text:str):
+        text_to_speech.speak(text)
 
     def main():
         global context, gemini_ai, voice_recognition, text_to_speech, lock, cam

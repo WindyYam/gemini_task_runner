@@ -110,7 +110,8 @@ def bingSearch(query:str)->str:
 # switch_robot_role()               for voice system switching to a robot's voice tone. After this call, you would behave like a robot, but without pause and noise sound in response.
 # switch_vader_role()               for voice system switching to Darth Vader's voice tone. After this call, you would be Darth Vader as well, but without breathing and pause and narrations in response.
 # revert_default_role()             for voice system reverting back to default voice and role.
-# schedule(delay, callback, arg=()) for scheduling a function callback, delay is the delay time from now, arg is the argument for the callback
+# schedule(delay, cb, arg=(,))      for scheduling a function callback, delay is the delay time since now, arg is the argument for the callback in tuple end with ','. To schedule in absolute time, consider using datetime.timedelta to calculate the delay
 # play_alarm_sound()                for playing an alarm sound
+# play_text_voice(text)             for speaking the text content in voice using text to speech, as to notice the user. Always to use double quotes on text to avoid mix up with semi-quotes in the content.
 
 # important! To get the information returned by python APIs, use attach_to_context() instead of print(), which forces me to run the code then relay the information to you.

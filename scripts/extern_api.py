@@ -153,7 +153,7 @@ def webSearch(query: str, max_results=10) -> list:
                     })
                 return results
         except ImportError:
-            print("duckduckgo-search library not installed. Install with: pip install duckduckgo-search")
+            print("duckduckgo-search library not installed. Install with: pip install ddgs")
         except Exception as e:
             print(f"DDG library failed: {e}")
         return None

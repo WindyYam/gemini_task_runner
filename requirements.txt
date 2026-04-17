@@ -1,4 +1,4 @@
-google-generativeai==0.8.5
+google-genai>=0.8.0
 pygame==2.5.2
 RealTimeSTT==0.2.1
 RealTimeTTS==0.4.4

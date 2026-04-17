@@ -1,69 +1,82 @@
 import os
-import google.generativeai as genai
-from datetime import datetime
+import google.genai as genai
+from google.genai import types
 import time
 
 class GeminiAI:
     def __init__(self, model_name, system_instruction):
-        genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable not found")
+
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = model_name
+
+        self.generation_config = types.GenerateContentConfig(
+            temperature=0.7,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=8192,
+            system_instruction=system_instruction,
+            safety_settings=[
+                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+            ],
+        )
+
         try:
             print("Available models:")
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    print(m.name)
+            for m in self.client.models.list():
+                print(getattr(m, "name", m))
             print("Previous uploaded files:")
-            lists = genai.list_files()
-            for item in lists:
-                print(item.name, item.mime_type, item.display_name)
+            for item in self.client.files.list():
+                print(getattr(item, "name", "?"), getattr(item, "mime_type", "?"), getattr(item, "display_name", "?"))
         except Exception as e:
             print(e)
             pass
-        
-        self.model = self._initialize_model(model_name, system_instruction)
-
-    def _initialize_model(self, model_name, system_instruction):
         print('Loading model', model_name)
-        
-        # Updated safety settings for latest API
-        safety_settings = [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_NONE"
-            }
-        ]
-        
-        return genai.GenerativeModel(
-            model_name=model_name,
-            safety_settings=safety_settings,
-            system_instruction=system_instruction
-        )
+
+    def _to_part(self, part):
+        if isinstance(part, str):
+            return types.Part(text=part)
+
+        # Uploaded files expose URI + MIME info and need to be wrapped as file_data.
+        file_uri = getattr(part, "uri", None)
+        mime_type = getattr(part, "mime_type", None)
+        if file_uri and mime_type:
+            return types.Part(file_data=types.FileData(file_uri=file_uri, mime_type=mime_type))
+
+        # Allow already-constructed SDK parts to pass through.
+        if isinstance(part, types.Part):
+            return part
+
+        return types.Part(text=str(part))
+
+    def _to_contents(self, messages: list):
+        contents = []
+        for msg in messages:
+            if isinstance(msg, dict) and "role" in msg and "parts" in msg:
+                parts = msg.get("parts", [])
+                if not isinstance(parts, list):
+                    parts = [parts]
+                contents.append(
+                    types.Content(
+                        role=msg.get("role", "user"),
+                        parts=[self._to_part(p) for p in parts],
+                    )
+                )
+            else:
+                # Fallback for direct string/part inputs.
+                contents.append(types.Content(role="user", parts=[self._to_part(msg)]))
+        return contents
 
     def generate_response(self, parts: list):
-        # Updated generation config for latest API
-        generation_config = {
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 8192,
-        }
-        
-        response = self.model.generate_content(
-            parts, 
-            stream=True, 
-            generation_config=generation_config,
-            request_options={"timeout": 30}
+        response = self.client.models.generate_content_stream(
+            model=self.model_name,
+            contents=self._to_contents(parts),
+            config=self.generation_config,
         )
         return response
 
@@ -96,37 +109,39 @@ class GeminiAI:
 
     def upload_file(self, path, display_name):
         """Upload a file to Gemini and return the file object"""
-        uploaded_file = genai.upload_file(path=path, display_name=display_name)
+        uploaded_file = self.client.files.upload(
+            file=path,
+            config=types.UploadFileConfig(display_name=display_name),
+        )
         # Wait for file to be processed
         self.wait_file(uploaded_file)
         return uploaded_file
     
     def get_file(self, name):
         """Get a file object by name"""
-        return genai.get_file(name)
+        return self.client.files.get(name=name)
     
     def wait_file(self, file_obj):
         """Wait for file to be processed"""
-        while file_obj.state.name == "PROCESSING":
+        while getattr(getattr(file_obj, "state", None), "name", "") == "PROCESSING":
             print('.', end='')
             time.sleep(0.5)
-            file_obj = genai.get_file(file_obj.name)
+            file_obj = self.client.files.get(name=file_obj.name)
         
-        if file_obj.state.name == "FAILED":
+        if getattr(getattr(file_obj, "state", None), "name", "") == "FAILED":
             raise ValueError(f"File processing failed: {file_obj.error}")
         
         return file_obj
 
     def clear_files(self):
         """Delete all uploaded files"""
-        lists = genai.list_files()
-        for item in lists:
+        for item in self.client.files.list():
             print(f"Deleting: {item.name} {item.mime_type} {item.display_name}")
-            genai.delete_file(item)
+            self.client.files.delete(name=item.name)
 
     def delete_file(self, file_obj):
         """Delete a specific file"""
-        genai.delete_file(file_obj)
+        self.client.files.delete(name=file_obj.name)
 
 def main():
     """Test function to verify GeminiAI functionality"""

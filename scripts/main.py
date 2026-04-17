@@ -22,7 +22,7 @@ if __name__ == "__main__":
     from queue import Queue
     from app_watchdog import ApplicationWatchdog, CHECK_INTERVAL
     from unified_recorder import UnifiedRecorder
-    from google.generativeai.types.file_types import File
+    from google.genai.types import File
     print("Usage: Modify the config.json to change parameters")
 
     SOUNDS_PATH = 'sounds/'

@@ -55,10 +55,10 @@ def getCity()->str:
     citydata = data['city']
     return(citydata)
 
-# online search for any information
-def webSearch(query: str, max_results=10) -> list:
+# online search for any information you don't know from bing search engine 
+def webSearch(query:str, max_results=10)->str:
     """
-    Search using multiple fallback methods
+    Scrape search results from DuckDuckGo
     
     Args:
         query: Search query string
@@ -68,110 +68,57 @@ def webSearch(query: str, max_results=10) -> list:
         List of dictionaries containing search results with title, description, and URL
     """
     
-    # Method 1: Try DuckDuckGo API (unofficial but more stable than HTML scraping)
-    def try_ddg_api(query, max_results):
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            
-            # DuckDuckGo instant answer API
-            url = f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1&skip_disambig=1"
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = []
-                
-                # Get results from RelatedTopics
-                for topic in data.get('RelatedTopics', [])[:max_results]:
-                    if isinstance(topic, dict) and 'Text' in topic:
-                        results.append({
-                            'title': topic.get('Text', '').split(' - ')[0] if ' - ' in topic.get('Text', '') else topic.get('Text', '')[:100],
-                            'description': topic.get('Text', ''),
-                            'url': topic.get('FirstURL', '')
-                        })
-                
-                if results:
-                    return results
-        except Exception as e:
-            print(f"DDG API failed: {e}")
-        return None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36"
+    }
     
-    # Method 2: Try SearXNG (open-source meta search engine)
-    def try_searxng(query, max_results):
-        try:
-            # Public SearXNG instances (you can self-host for better reliability)
-            instances = [
-                "https://searx.be",
-                "https://search.privacyguides.net",
-                "https://searx.tiekoetter.com"
-            ]
-            
-            for instance in instances:
-                try:
-                    url = f"{instance}/search"
-                    params = {
-                        'q': query,
-                        'format': 'json',
-                        'language': 'en'
-                    }
-                    
-                    response = requests.get(url, params=params, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
-                        results = []
-                        
-                        for result in data.get('results', [])[:max_results]:
-                            results.append({
-                                'title': result.get('title', ''),
-                                'description': result.get('content', ''),
-                                'url': result.get('url', '')
-                            })
-                        
-                        if results:
-                            return results
-                except:
+    # Encode query for URL
+    encoded_query = quote_plus(query)
+    url = f'https://html.duckduckgo.com/html/?q={encoded_query}'
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        search_results = []
+        
+        # Find all result containers
+        results = soup.find_all('div', class_='result')
+        
+        for result in results[:max_results]:
+            try:
+                # Extract title and URL
+                title_elem = result.find('a', class_='result__a')
+                if not title_elem:
                     continue
-        except Exception as e:
-            print(f"SearXNG failed: {e}")
-        return None
-    
-    # Method 3: Use duckduckgo-search library (recommended)
-    def try_ddg_library(query, max_results):
-        try:
-            # This requires: pip install duckduckgo-search
-            from ddgs import DDGS
-            
-            with DDGS() as ddgs:
-                results = []
-                for result in ddgs.text(query, max_results=max_results):
-                    results.append({
-                        'title': result.get('title', ''),
-                        'description': result.get('body', ''),
-                        'url': result.get('href', '')
+                    
+                title = title_elem.get_text(strip=True)
+                url = title_elem.get('href', '')
+                
+                # Extract description
+                desc_elem = result.find('a', class_='result__snippet')
+                description = desc_elem.get_text(strip=True) if desc_elem else ''
+                
+                if title and url:
+                    search_results.append({
+                        'title': title,
+                        'description': description,
+                        'url': url
                     })
-                return results
-        except ImportError:
-            print("duckduckgo-search library not installed. Install with: pip install ddgs")
-        except Exception as e:
-            print(f"DDG library failed: {e}")
-        return None
-    
-    # Try methods in order of preference
-    methods = [
-        try_ddg_library,  # Best option
-        try_searxng,      # Good fallback
-        try_ddg_api       # Limited but works
-    ]
-    
-    for method in methods:
-        results = method(query, max_results)
-        if results:
-            return results
-    
-    print("All search methods failed")
-    return []
+                    
+            except Exception as e:
+                print(f"Error parsing result: {str(e)}")
+                continue
+                
+        return search_results
+        
+    except requests.RequestException as e:
+        print(f"Error making request: {str(e)}")
+        return []
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return []
 
 # get webpage context in plain text
 def get_webpage_text(url):
@@ -213,9 +160,10 @@ def get_webpage_text(url):
     except requests.RequestException as e:
         return f"An error occurred: {e}"
 
-def set_browser_data_path(path):
-    global USER_CHROME_DATA_PATH
+def set_browser_data_path(path, profile):
+    global USER_CHROME_DATA_PATH, PROFILE_DIR
     USER_CHROME_DATA_PATH = path
+    PROFILE_DIR = profile
 
 def check_browser():
     global player
@@ -226,7 +174,7 @@ def check_browser():
             # spotify player
             player = Browser(
                 user_data_dir=USER_CHROME_DATA_PATH,
-                profile_directory="Default",
+                profile_directory=PROFILE_DIR,
                 temp_dir = "temp/",
             )
             player.start_driver()

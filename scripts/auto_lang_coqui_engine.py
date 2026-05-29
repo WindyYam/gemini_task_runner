@@ -1,4 +1,4 @@
-from RealtimeTTS import BaseEngine
+from RealtimeTTS import BaseEngine,CoquiEngine
 import torch.multiprocessing as mp
 from threading import Lock, Thread
 from typing import Union, List
@@ -890,7 +890,7 @@ class AutoLangCoquiEngine(BaseEngine):
             file_path = os.path.join(model_folder, file_name)
             if not os.path.exists(file_path):
                 print(f"Downloading {file_name} to {file_path}...")
-                AutoLangCoquiEngine.download_file(url, file_path)
+                CoquiEngine.download_file(url, file_path)
                 logging.info(f"{file_name} downloaded successfully.")
             else:
                 logging.info(f"{file_name} exists in {file_path} (no download).")

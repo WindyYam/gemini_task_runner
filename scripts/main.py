@@ -2,12 +2,11 @@ if __name__ == "__main__":
     import os
     import threading
     import pygame
-    import pygame.camera
     import time
     from datetime import datetime, date, timedelta
     import io
     from typing import Literal
-    from gemini_ai import GeminiAI
+    from general_ai import GeneralAI
     from voice_recognition import VoiceRecognition
     from text_to_speech import TextToSpeech
     from extern_api import *
@@ -17,12 +16,10 @@ if __name__ == "__main__":
     from pathlib import Path
     import sys
     from PIL import ImageGrab, Image
-    import cv2
     import numpy as np
     from queue import Queue
     from app_watchdog import ApplicationWatchdog, CHECK_INTERVAL
-    from unified_recorder import UnifiedRecorder
-    from google.genai.types import File
+
     print("Usage: Modify the config.json to change parameters")
 
     SOUNDS_PATH = 'sounds/'
@@ -94,7 +91,8 @@ if __name__ == "__main__":
         MAX_MEMORY = 10
         AI_NAME = 'Jarvis'
         TARGET_CAMERA = 'DroidCam Video'
-        USER_CHROME_DATA_PATH = 'C:\\Users\\Zhenya\\AppData\\Local\\Google\\Chrome\\User Data'
+        USER_CHROME_DATA_PATH = 'C:\\Users\\zhenya.yang\\AppData\\Local\\Google\\Chrome\\User Data'
+        CHROME_PROFILE_DIR = 'Default'
         RECORDER_DEVICE = None
         SPEAKER_DEVICE = None
 
@@ -102,6 +100,7 @@ if __name__ == "__main__":
             'ai_name': AI_NAME,
             'model_name': 'gemini-2.0-flash',
             'user_chrome_data_path': USER_CHROME_DATA_PATH,
+            'chrome_profile_dir' : CHROME_PROFILE_DIR,
             'max_history' : MAX_HISTORY,
             'max_memory' : MAX_MEMORY,
             'target_camera': TARGET_CAMERA,
@@ -128,20 +127,16 @@ if __name__ == "__main__":
                 json.dump(config, f, indent=2)
 
     check_config()
-    set_browser_data_path(config['user_chrome_data_path'])
+    set_browser_data_path(config['user_chrome_data_path'], config['chrome_profile_dir'])
 
-    instruction = [
-        f'''Your name is {config['ai_name']}.
-        You are a well educated and professional assistant, have great knowledge on everything. You make most suitable decision for the users.
-        Keep in mind that there can be multiple users speaking. If it is a main master user, his/her name will be as prefix. If it is a guest, there will be a **Guest:** prefix, attached at the beginning of request. 
-        If the request message is with prefix **System:** then it means this message is from the system, not the user. 
-        You have the interface on physical world through python code, there are several python function APIs to interact with the physical world. The list of which is in the uploaded text list file. 
-        To execute the python code, put the code as python snippet format at the end of the response, then any code in the snippet in response will be executed. Only one code snippet per response is allowed.
-        All your response will be spoken out by default using text to speech.
-        Be aware, you will not respond to the guest for the requests about operating the house, unless you get authorization from the users that are not with guest prefix. For other kinds of requests, you should help with the guest. 
-        To operate with the PC, use the python code execution with necessary library. But do not do potentially harmful operations, like deleting files, unless get the non guest users' permission. 
-        You are to answer questions in a short concise and always humorous way, and talk more casual and use more expressive words that talks more lively, like haha, oh, wow, hmmm.'''
-    ]
+    instruction =f'''Your name is {config['ai_name']}.
+You are a well educated and professional assistant, have great knowledge on everything. 
+Keep in mind that there can be multiple users speaking. If it is a main master user, his/her name will be as prefix. If it is a guest, there will be a **Guest:** prefix, attached at the beginning of request. 
+If the request message is with prefix **System:** then it means this message is from the system, not the user. 
+You have the interface on physical world through python code, there are several python function APIs to interact with the physical world. The list of which is in the uploaded text list file. 
+To execute the python code, put the code as python snippet format at the end of the response, then any code in the snippet in response will be executed. Only one code snippet per response is allowed.
+To operate with the PC, use the python code execution with necessary library. But do not do potentially harmful operations, like deleting files, unless get the non guest users' permission. 
+You are to answer questions in a short concise way, and talk more casual and use more expressive words that talks more lively, like haha, oh, wow, hmmm.'''
 
     def append2log(text:str):
         fname = CHATLOG_PATH + 'chatlog-' + today + '.txt'
@@ -149,20 +144,8 @@ if __name__ == "__main__":
             f.write(text.strip() + "\n")
 
     def save_history():
-        def serialize_part(part):
-            if isinstance(part, File):
-                return f"+{part.name}+"
-            return part
-
-        # Serialize context['talk'], mapping File objects to "+filename+"
-        serialized_talk = []
-        for item in context['talk']:
-            new_item = item.copy()
-            new_item['parts'] = [serialize_part(p) for p in item['parts']]
-            serialized_talk.append(new_item)
-
         with open(f'{TEMP_PATH}{HISTORY_FILE}', "w", encoding='utf8') as f:
-            f.write(json.dumps(serialized_talk))
+            f.write(json.dumps(context['talk']))
 
     def load_history():
         try:
@@ -174,7 +157,7 @@ if __name__ == "__main__":
                         if part.startswith('+') and part.endswith('+'):
                             # this is a gemini file
                             filename = part[1:-1]
-                            item['parts'][idx] = gemini_ai.get_file(filename)
+                            item['parts'][idx] = llmAI.get_file(filename)
 
         except Exception as e:
             print(e)
@@ -192,15 +175,15 @@ if __name__ == "__main__":
             if response.startswith('file:'):
                 filename = response.split(':', maxsplit=1)[1]
                 if response.endswith('.jpg'):
-                    context['upload_file'] = gemini_ai.upload_file(filename, display_name='Photo')
+                    context['upload_file'] = llmAI.upload_file(filename, display_name='Photo')
                     response = 'Photo uploaded.'
                     context['upload_in_a_row'] += 1
                 elif response.endswith('.txt'):
-                    context['upload_file'] = gemini_ai.upload_file(filename, display_name='Text')
+                    context['upload_file'] = llmAI.upload_file(filename, display_name='Text')
                     response = 'Content uploaded.'
                     context['upload_in_a_row'] += 1
                 else:
-                    context['upload_file'] = gemini_ai.upload_file(filename, display_name='File')
+                    context['upload_file'] = llmAI.upload_file(filename, display_name='File')
                     response = 'File uploaded.'
                     context['upload_in_a_row'] += 1
             response = f"**System:**{response}"
@@ -220,47 +203,6 @@ if __name__ == "__main__":
             context['vision_mode'] = True
         else:
             context['vision_mode'] = False
-
-    def camera_shot()->str:
-        # Use recorder's private camera for snapshot
-        if recorder._camera is not None:
-            recorder._camera.start()
-            time.sleep(0.5)
-            img = recorder._camera.get_image()
-            shutter_sound.play()
-            timestr = time.strftime("%Y%m%d-%H%M%S")
-            photo_path = f"{IMAGE_PATH}camera-{timestr}.jpg"
-            pygame.image.save(img, photo_path)
-            recorder._camera.stop()
-            return 'file:'+photo_path
-        else:
-            print("No camera available!")
-            return ''
-    
-    def screenshot() -> str:
-        # Capture the screenshot using UnifiedRecorder API
-        screenshot = recorder.grab_screen(resize_factor=0.5)
-        shutter_sound.play()
-        if screenshot is None:
-            return ''
-        timestr = time.strftime("%Y%m%d-%H%M%S")
-        filename = f"{IMAGE_PATH}screenshot-{timestr}.jpg"
-        screenshot.save(filename, "JPEG")
-        return 'file:'+filename
-    
-    def capture_upload_photo():
-        if context['vision_mode_camrea_is_screen']:
-            filename = screenshot()
-        else:
-            filename = camera_shot()
-
-        previous = context['upload_file']
-        context['upload_file'] = gemini_ai.upload_file(path=filename,
-                            display_name="Photo")
-        if previous:
-            # A previously unused photo file
-            gemini_ai.delete_file(previous)
-
 
     def exec_code(code:str):
         try:
@@ -399,14 +341,18 @@ if __name__ == "__main__":
         delete_memory_sound.play()
 
     def main():
-        global context, gemini_ai, voice_recognition, text_to_speech, recorder, mInputQueue, gemini_ai, text_to_speech, voice_recognition
+        global context, llmAI, voice_recognition, text_to_speech, mInputQueue, text_to_speech, voice_recognition
 
         init_list = []
-        
-        mInputQueue = queue.Queue()
+        from json import JSONEncoder
+        # for gemini file serialization
+        def _default(self, obj):
+            return getattr(obj.__class__, "to_json", _default.default)(obj)
 
-        # Initialize camera recorder (platform is now auto-detected in UnifiedRecorder)
-        recorder = UnifiedRecorder(target_camera=config.get('target_camera'))
+        _default.default = JSONEncoder().default
+        JSONEncoder.default = _default
+
+        mInputQueue = queue.Queue()
 
         # Start event thread
         threading.Thread(target=event_thread).start()
@@ -422,45 +368,28 @@ if __name__ == "__main__":
                 needUpload = True
             else:
                 try:
-                    test = gemini_ai.get_file(talk_header[0]['parts'][0].name)
+                    test = llmAI.get_file(talk_header[0]['parts'][0].name)
                 except Exception as e:
                     needUpload = True
 
             if needUpload:
                 try:
-                    function_file = gemini_ai.upload_file(path="api_list.txt", display_name="Python API")
+                    function_file = llmAI.upload_file(path="api_list.txt", display_name="Python API")
                     talk_header[0]['parts'][0] = function_file
                 except Exception as e:
                     print(e)
                     text_to_speech.feed('Hmm, looks like some connection issues out there.')
 
-        def check_history_files():
-            for item in context['talk']:
-                for i, part in enumerate(item['parts']):
-                    if part is File:
-                        try:
-                            test = gemini_ai.get_file(part.name)
-                        except Exception as e:
-                            print(e)
-                            print('Some of the files are invald, clear the file reference')
-                            # some of the file might be invalid already(might due to TTL in the server), just clear the reference for now
-                            item['parts'][i] = ' '
-
         def on_record_start():
             if not context['freetalk']:
                 text_to_speech.stop()
-            if context['vision_mode']:
-                if context['vision_mode_camrea_is_screen']:
-                    recorder.start_recording('screen')
-                else:
-                    recorder.start_recording('camera')
 
         def gemini_start():
-            global gemini_ai
-            gemini_ai = GeminiAI(model_name=config['model_name'], system_instruction=instruction)
-        gemini_ai_startup = threading.Thread(target=gemini_start)
-        gemini_ai_startup.start()
-        init_list.append(gemini_ai_startup)
+            global llmAI
+            llmAI = GeneralAI(system_instruction=instruction)
+        llmAI_startup = threading.Thread(target=gemini_start)
+        llmAI_startup.start()
+        init_list.append(llmAI_startup)
 
         def text_to_speech_start():
             global text_to_speech
@@ -484,18 +413,6 @@ if __name__ == "__main__":
             while True:
                 text = input()
                 text = f'**Master:**{text}'
-                if context['vision_mode']:
-                    if context['vision_mode_camrea_is_screen']:
-                        recorder.start_recording('screen')
-                    else:
-                        recorder.start_recording('camera')
-                    time.sleep(5)
-                    timestr = time.strftime("%Y%m%d-%H%M%S")
-                    file_name = f"{IMAGE_PATH}video-{timestr}.mp4"
-                    recorder.stop_recording(file_name)
-                    recording_sound.play()
-                    context['upload_file'] = gemini_ai.upload_file(path=file_name,
-                        display_name="Video")
 
                 # Request is from keyboard, clear some flags
                 context['load_value_in_a_row'] = 0
@@ -567,14 +484,6 @@ if __name__ == "__main__":
                                 text = f'**{closest_user}:**{temp_text}'
                             else:
                                 text = f'**Guest:**{temp_text}'
-
-                            if(recorder.is_recording):
-                                recording_sound.play()
-                                timestr = time.strftime("%Y%m%d-%H%M%S")
-                                file_name = f"{IMAGE_PATH}video-{timestr}.mp4"
-                                recorder.stop_recording(file_name)
-                                context['upload_file'] = gemini_ai.upload_file(path=file_name,
-                                    display_name="Video")
                                 
                             keyboard.unhook_all()
                         else:
@@ -666,20 +575,11 @@ if __name__ == "__main__":
                             # sound
                             print('\a')
 
-                        if(recorder.is_recording):
-                            recording_sound.play()
-                            timestr = time.strftime("%Y%m%d-%H%M%S")
-                            file_name = f"{IMAGE_PATH}video-{timestr}.mp4"
-                            recorder.stop_recording(file_name)
-                            context['upload_file'] = gemini_ai.upload_file(path=file_name,
-                                display_name="Video")
                         # Request is from voice, clear some flags
                         context['load_value_in_a_row'] = 0
                         context['upload_in_a_row'] = 0
                         mInputQueue.put(text)
-                    else:
-                        if(recorder.is_recording):
-                            recorder.stop_recording(None)
+
                 except Exception as e:
                     exceptionCounter += 1
                     print(e)
@@ -723,7 +623,7 @@ if __name__ == "__main__":
         while True:
             try:
                 check_function_file()
-                check_history_files()
+                #check_history_files()
 
                 # only fetch the latest text msg
                 if mInputQueue.qsize() > 0:
@@ -736,21 +636,21 @@ if __name__ == "__main__":
                 
                 parts = []
                 if context['upload_file']:
-                    gemini_ai.wait_file(context['upload_file'])
+                    llmAI.wait_file(context['upload_file'])
                     parts.append(context['upload_file'])
                     context['upload_file'] = None
                 parts.append(text)
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                parts.append(f'**System:**{timestamp}')
+                #timestamp = datetime.now().strftime("%H:%M:%S")
+                #parts.append(f'**System:**{timestamp}')
 
                 talk_header[0]['parts'][2] = context['memory_str']
                 temp = talk_header + context['talk']
                 temp.append({'role': 'user', 'parts': parts})
-                print(f"You: {text}, {timestamp}")
+                print(f"You: {text}")
                 response = "(Well, looks like I can't get a response from the server.)"
                 # Process user's request
                 try:
-                    response = gemini_ai.generate_response(temp)
+                    response = llmAI.generate_response(temp)
                 except Exception as e:
                     print(f'(Exception: {e})')
                 
@@ -795,7 +695,7 @@ if __name__ == "__main__":
                         responseText = responseTextContainer[0]
                 if(responseText == ''):
                     responseText = "(Well, looks like something wrong.)"
-                pythoncode = gemini_ai.extract_code(responseText)
+                pythoncode = llmAI.extract_code(responseText)
 
                 # Update context
                 context['talk'].append({'role': 'user', 'parts': parts})
@@ -823,10 +723,6 @@ if __name__ == "__main__":
                 save_history()
                 if thread:
                     thread.join()
-                
-                # conserve energy
-                # if not context['vision_mode']:
-                #     cam.stop()
 
             except Exception as e:
                 print(e)

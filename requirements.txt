@@ -1,8 +1,7 @@
 google-genai>=0.8.0
 pygame==2.5.2
-RealTimeSTT==0.2.1
-RealTimeTTS==0.4.4
 coqui-tts==0.24.1
+faster-whisper==1.1.1
 Resemblyzer==0.1.4
 langdetect==1.0.9
 beautifulsoup4==4.12.3

@@ -34,6 +34,7 @@ if __name__ == "__main__":
     context = {
         'talk': [],
         'upload_file': None,
+        'api_file': None,
         'vision_mode': False,
         'load_value_in_a_row': 0,   # This and the following is to prevent system message trigger infinite system message loop. Sometimes the AI will post load_value in a response to load_value and loop it forever.
         'upload_in_a_row': 0,
@@ -91,6 +92,7 @@ if __name__ == "__main__":
         MAX_MEMORY = 10
         AI_NAME = 'Jarvis'
         TARGET_CAMERA = 'DroidCam Video'
+        SERVER_URL = 'http://192.168.1.219:11434/api/generate'
         USER_CHROME_DATA_PATH = 'C:\\Users\\zhenya.yang\\AppData\\Local\\Google\\Chrome\\User Data'
         CHROME_PROFILE_DIR = 'Default'
         RECORDER_DEVICE = None
@@ -104,6 +106,7 @@ if __name__ == "__main__":
             'max_history' : MAX_HISTORY,
             'max_memory' : MAX_MEMORY,
             'target_camera': TARGET_CAMERA,
+            'server_url': SERVER_URL,
             'recorder_device': RECORDER_DEVICE,
             'speaker_device': SPEAKER_DEVICE,
             'voice_similarity_threshold': 0.72,
@@ -113,6 +116,17 @@ if __name__ == "__main__":
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
+
+            updated = False
+            for key, value in default_config.items():
+                if key not in config:
+                    config[key] = value
+                    updated = True
+
+            if updated:
+                with open(CONFIG_FILE, 'w') as f:
+                    json.dump(config, f, indent=2)
+
             print('-----')
             for key in default_config.keys():
                 print(key, config[key])
@@ -130,13 +144,13 @@ if __name__ == "__main__":
     set_browser_data_path(config['user_chrome_data_path'], config['chrome_profile_dir'])
 
     instruction =f'''Your name is {config['ai_name']}.
-You are a well educated and professional assistant, have great knowledge on everything. 
-Keep in mind that there can be multiple users speaking. If it is a main master user, his/her name will be as prefix. If it is a guest, there will be a **Guest:** prefix, attached at the beginning of request. 
+You are a well educated and professional assistant. 
+There can be multiple users speaking. If it is a main master user, his/her name will be as prefix. If it is a guest, there will be a **Guest:** prefix, attached at the beginning of request. 
 If the request message is with prefix **System:** then it means this message is from the system, not the user. 
 You have the interface on physical world through python code, there are several python function APIs to interact with the physical world. The list of which is in the uploaded text list file. 
 To execute the python code, put the code as python snippet format at the end of the response, then any code in the snippet in response will be executed. Only one code snippet per response is allowed.
 To operate with the PC, use the python code execution with necessary library. But do not do potentially harmful operations, like deleting files, unless get the non guest users' permission. 
-You are to answer questions in a short concise way, and talk more casual and use more expressive words that talks more lively, like haha, oh, wow, hmmm.'''
+You are to answer questions in a short concise way, and talk more naturally'''
 
     def append2log(text:str):
         fname = CHATLOG_PATH + 'chatlog-' + today + '.txt'
@@ -154,7 +168,7 @@ You are to answer questions in a short concise way, and talk more casual and use
                 context['talk'] = json.loads(text)
                 for item in context['talk']:
                     for idx, part in enumerate(item['parts']):
-                        if part.startswith('+') and part.endswith('+'):
+                        if isinstance(part, str) and part.startswith('+') and part.endswith('+'):
                             # this is a gemini file
                             filename = part[1:-1]
                             item['parts'][idx] = llmAI.get_file(filename)
@@ -174,11 +188,12 @@ You are to answer questions in a short concise way, and talk more casual and use
             context['load_value_in_a_row'] += 1
             if response.startswith('file:'):
                 filename = response.split(':', maxsplit=1)[1]
-                if response.endswith('.jpg'):
+                lower_name = filename.lower()
+                if lower_name.endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif')):
                     context['upload_file'] = llmAI.upload_file(filename, display_name='Photo')
                     response = 'Photo uploaded.'
                     context['upload_in_a_row'] += 1
-                elif response.endswith('.txt'):
+                elif lower_name.endswith('.txt'):
                     context['upload_file'] = llmAI.upload_file(filename, display_name='Text')
                     response = 'Content uploaded.'
                     context['upload_in_a_row'] += 1
@@ -203,6 +218,28 @@ You are to answer questions in a short concise way, and talk more casual and use
             context['vision_mode'] = True
         else:
             context['vision_mode'] = False
+
+    def screenshot() -> str:
+        filename = os.path.join(
+            IMAGE_PATH,
+            f"screen-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.jpg",
+        )
+        image = ImageGrab.grab(all_screens=True)
+        rgb_image = image.convert('RGB')
+
+        max_width = 1280
+        if rgb_image.size[0] > max_width:
+            ratio = max_width / float(rgb_image.size[0])
+            new_height = int(rgb_image.size[1] * ratio)
+            rgb_image = rgb_image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+        rgb_image.save(filename, 'JPEG', quality=70, optimize=True)
+        shutter_sound.play()
+        return 'file:' + filename
+
+    def camera_shot() -> str:
+        # Fallback to desktop screenshot when no camera capture provider is configured.
+        return screenshot()
 
     def exec_code(code:str):
         try:
@@ -363,19 +400,11 @@ You are to answer questions in a short concise way, and talk more casual and use
         ]
 
         def check_function_file():
-            needUpload = False
-            if not talk_header[0]['parts'][0]:
-                needUpload = True
-            else:
-                try:
-                    test = llmAI.get_file(talk_header[0]['parts'][0].name)
-                except Exception as e:
-                    needUpload = True
-
-            if needUpload:
+            if not context['api_file']:
                 try:
                     function_file = llmAI.upload_file(path="api_list.txt", display_name="Python API")
-                    talk_header[0]['parts'][0] = function_file
+                    context['api_file'] = function_file
+                    talk_header[0]['parts'][0] = context['api_file']
                 except Exception as e:
                     print(e)
                     text_to_speech.feed('Hmm, looks like some connection issues out there.')
@@ -386,7 +415,10 @@ You are to answer questions in a short concise way, and talk more casual and use
 
         def gemini_start():
             global llmAI
-            llmAI = GeneralAI(system_instruction=instruction)
+            llmAI = GeneralAI(
+                system_instruction=instruction,
+                server_url=config['server_url']
+            )
         llmAI_startup = threading.Thread(target=gemini_start)
         llmAI_startup.start()
         init_list.append(llmAI_startup)
@@ -633,12 +665,30 @@ You are to answer questions in a short concise way, and talk more casual and use
                     text = mInputQueue.get()
                 if text == '':
                     continue
+
+                def compact_parts_for_history(input_parts):
+                    history_parts = []
+                    for item in input_parts:
+                        if isinstance(item, dict) and item.get('type') == 'image':
+                            history_parts.append(f"[Image: {item.get('name', 'Image')}]")
+                        else:
+                            history_parts.append(str(item))
+                    return history_parts
                 
                 parts = []
                 if context['upload_file']:
                     llmAI.wait_file(context['upload_file'])
                     parts.append(context['upload_file'])
                     context['upload_file'] = None
+
+                if context['vision_mode']:
+                    try:
+                        vision_path = camera_shot() if not context['vision_mode_camrea_is_screen'] else screenshot()
+                        if vision_path.startswith('file:'):
+                            parts.append(llmAI.upload_file(vision_path.split(':', maxsplit=1)[1], display_name='Vision'))
+                    except Exception as e:
+                        print(f'Vision capture failed: {e}')
+
                 parts.append(text)
                 #timestamp = datetime.now().strftime("%H:%M:%S")
                 #parts.append(f'**System:**{timestamp}')
@@ -697,8 +747,10 @@ You are to answer questions in a short concise way, and talk more casual and use
                     responseText = "(Well, looks like something wrong.)"
                 pythoncode = llmAI.extract_code(responseText)
 
+                history_parts = compact_parts_for_history(parts)
+
                 # Update context
-                context['talk'].append({'role': 'user', 'parts': parts})
+                context['talk'].append({'role': 'user', 'parts': history_parts})
                 context['talk'].append({'role': 'model', 'parts': [responseText]})
                 if len(context['talk']) > config['max_history']:
                     context['talk'] = context['talk'][-config['max_history']:]
@@ -718,7 +770,7 @@ You are to answer questions in a short concise way, and talk more casual and use
                     context['load_value_in_a_row'] = 0
                     context['upload_in_a_row'] = 0
 
-                append2log(f"You: {parts}")
+                append2log(f"You: {history_parts}")
                 append2log(f"AI: {responseText}")
                 save_history()
                 if thread:

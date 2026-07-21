@@ -1,291 +1,258 @@
-from RealtimeTTS import TextToAudioStream
-import stream2sentence as s2s
-import threading
-import traceback
 import logging
 import queue
+import re
+import threading
 import time
-import wave
 from typing import Iterator
 
-class TextStreamToAudioStream(TextToAudioStream):
-    def play_async(self,
-                   external_text_iterator: Iterator[str],
-                   fast_sentence_fragment: bool = True,
-                   buffer_threshold_seconds: float = 0.0,
-                   minimum_sentence_length: int = 10, 
-                   minimum_first_fragment_length: int = 10,
-                   log_synthesized_text=False,
-                   reset_generated_text: bool = True,
-                   output_wavfile: str = None,
-                   on_sentence_synthesized=None,
-                   before_sentence_synthesized=None,
-                   on_audio_chunk=None,
-                   tokenizer: str = "",
-                   tokenize_sentences=None,
-                   language: str = "",
-                   context_size: int = 12,
-                   muted: bool = False,
-                   sentence_fragment_delimiters: str = ".?!;:,\n…)]}。-",
-                   force_first_fragment_after_words=15,
-                   ):
-        """
-        Async handling of text to audio synthesis, see play() method.
-        """
-        if not self.is_playing_flag:
-            self.is_playing_flag = True
-            # Pass additional parameter to differentiate external call
-            args = (external_text_iterator, fast_sentence_fragment, buffer_threshold_seconds, minimum_sentence_length, 
-                    minimum_first_fragment_length, log_synthesized_text, reset_generated_text, 
-                    output_wavfile, on_sentence_synthesized, before_sentence_synthesized, on_audio_chunk, tokenizer, tokenize_sentences, 
-                    language, context_size, muted, sentence_fragment_delimiters, 
-                    force_first_fragment_after_words, True)
-            self.play_thread = threading.Thread(target=self.play, args=args)
-            self.play_thread.start()
-        else:
-            logging.warning("play_async() called while already playing audio, skipping")
+import numpy as np
+import pyaudio
 
-    def play(
-            self,
-            external_text_iterator: Iterator[str],
-            fast_sentence_fragment: bool = True,
-            buffer_threshold_seconds: float = 0.0,
-            minimum_sentence_length: int = 10,
-            minimum_first_fragment_length: int = 10,
-            log_synthesized_text=False,
-            reset_generated_text: bool = True,
-            output_wavfile: str = None,
-            on_sentence_synthesized=None,
-            before_sentence_synthesized=None,
-            on_audio_chunk=None,
-            tokenizer: str = "nltk",
-            tokenize_sentences=None,
-            language: str = "en",
-            context_size: int = 12,
-            muted: bool = False,
-            sentence_fragment_delimiters: str = ".?!;:,\n…)]}。-",
-            force_first_fragment_after_words=15,
-            is_external_call=True,
-            ):
-        """
-        Handles the synthesis of text to audio.
-        Plays the audio stream and waits until it is finished playing.
-        If the engine can't consume generators, it utilizes a player.
 
-        Args:
-        - fast_sentence_fragment: Determines if sentence fragments should be quickly yielded. Useful when a faster response is desired even if a sentence isn't complete.
-        - buffer_threshold_seconds (float): Time in seconds for the buffering threshold, influencing the flow and continuity of audio playback. Set to 0 to deactivate. Default is 0.
-          - How it Works: The system verifies whether there is more audio content in the buffer than the duration defined by buffer_threshold_seconds. If so, it proceeds to synthesize the next sentence, capitalizing on the remaining audio to maintain smooth delivery. A higher value means more audio is pre-buffered, which minimizes pauses during playback. Adjust this upwards if you encounter interruptions.
-          - Helps to decide when to generate more audio based on buffered content.
-        - minimum_sentence_length (int): The minimum number of characters a sentence must have. If a sentence is shorter, it will be concatenated with the following one, improving the overall readability. This parameter does not apply to the first sentence fragment, which is governed by `minimum_first_fragment_length`. Default is 10 characters.
-        - minimum_first_fragment_length (int): The minimum number of characters required for the first sentence fragment before yielding. Default is 10 characters.
-        - log_synthesized_text: If True, logs the synthesized text chunks.
-        - reset_generated_text: If True, resets the generated text.
-        - output_wavfile: If set, saves the audio to the specified WAV file.
-        - on_sentence_synthesized: Callback function that gets called after hen a single sentence fragment was synthesized.
-        - before_sentence_synthesized: Callback function that gets called before a single sentence fragment gets synthesized.
-        - on_audio_chunk: Callback function that gets called when a single audio chunk is ready.
-        - tokenizer: Tokenizer to use for sentence splitting (currently "nltk" and "stanza" are supported).
-        - tokenize_sentences (Callable): A function that tokenizes sentences from the input text. You can write your own lightweight tokenizer here if you are unhappy with nltk and stanza. Defaults to None. Takes text as string and should return splitted sentences as list of strings.
-        - language: Language to use for sentence splitting.
-        - context_size: The number of characters used to establish context for sentence boundary detection. A larger context improves the accuracy of detecting sentence boundaries. Default is 12 characters.
-        - muted: If True, disables audio playback via local speakers (in case you want to synthesize to file or process audio chunks). Default is False.
-        - sentence_fragment_delimiters (str): A string of characters that are
-            considered sentence delimiters. Default is ".?!;:,\n…)]}。-".
-        - force_first_fragment_after_words (int): The number of words after
-            which the first sentence fragment is forced to be yielded.
-            Default is 15 words.
-        """
-        if self.global_muted:
-            muted = True
+class TextStreamToAudioStream:
+    """Lightweight text-stream to audio-stream bridge for one synthesis engine."""
 
-        if is_external_call:
-            if not self.play_lock.acquire(blocking=False):
-                logging.warning("play() called while already playing audio, skipping")
-                return
+    def __init__(self, engine, output_device_index=None):
+        self.engine = engine
+        self.output_device_index = output_device_index
 
+        self.is_playing_flag = False
+        self.stream_running = False
+
+        self._pyaudio = pyaudio.PyAudio()
+        self._audio_stream = None
+        self._audio_stream_lock = threading.Lock()
+
+        self._shutdown_event = threading.Event()
+        self._paused_event = threading.Event()
+        self._paused_event.clear()
+        self._writing_audio = threading.Event()
+
+        self.sentence_queue = queue.Queue()
+        self._parser_thread = None
+        self._synth_thread = None
+        self._audio_thread = None
+
+        self._sentence_fragment_delimiters = ".?!;:,\n...)]}。-"
+
+    def play_async(
+        self,
+        external_text_iterator: Iterator[str],
+        fast_sentence_fragment: bool = True,
+        buffer_threshold_seconds: float = 0.0,
+        minimum_sentence_length: int = 10,
+        minimum_first_fragment_length: int = 10,
+        log_synthesized_text=False,
+        reset_generated_text: bool = True,
+        output_wavfile: str = None,
+        on_sentence_synthesized=None,
+        before_sentence_synthesized=None,
+        on_audio_chunk=None,
+        tokenizer: str = "",
+        tokenize_sentences=None,
+        language: str = "",
+        context_size: int = 12,
+        muted: bool = False,
+        sentence_fragment_delimiters: str = ".?!;:,\n...)]}。-",
+        force_first_fragment_after_words=15,
+    ):
+        # Keep signature compatibility with previous implementation. Most args are not needed.
+        del (
+            fast_sentence_fragment,
+            buffer_threshold_seconds,
+            minimum_sentence_length,
+            minimum_first_fragment_length,
+            reset_generated_text,
+            output_wavfile,
+            on_audio_chunk,
+            tokenizer,
+            tokenize_sentences,
+            language,
+            context_size,
+            force_first_fragment_after_words,
+        )
+
+        if self.stream_running:
+            return
+
+        self._sentence_fragment_delimiters = sentence_fragment_delimiters or self._sentence_fragment_delimiters
+        self.stream_running = True
         self.is_playing_flag = True
 
-        # Log the start of the stream
-        logging.info(f"stream start")
+        if muted:
+            self._paused_event.set()
+        else:
+            self._paused_event.clear()
 
-        tokenizer = tokenizer if tokenizer else self.tokenizer 
-        language = language if language else self.language
+        self._ensure_audio_stream_started()
 
-        # Set the stream_running flag to indicate the stream is active
-        self.stream_start_time = time.time()
-        self.stream_running = True
-        abort_event = threading.Event()
-        self.abort_events.append(abort_event)
+        self._parser_thread = threading.Thread(
+            target=self._parser_worker,
+            args=(external_text_iterator,),
+            daemon=True,
+        )
+        self._synth_thread = threading.Thread(
+            target=self._synth_worker,
+            args=(log_synthesized_text, before_sentence_synthesized, on_sentence_synthesized),
+            daemon=True,
+        )
+        self._audio_thread = threading.Thread(target=self._audio_worker, daemon=True)
 
-        if self.player:
-            self.player.mute(muted)
-        elif hasattr(self.engine, "set_muted"):
-            self.engine.set_muted(muted)
+        self._parser_thread.start()
+        self._synth_thread.start()
+        self._audio_thread.start()
 
-        self.output_wavfile = output_wavfile
-        self.chunk_callback = on_audio_chunk
+    def _ensure_audio_stream_started(self):
+        with self._audio_stream_lock:
+            if self._audio_stream is None:
+                fmt, channels, rate = self.engine.get_stream_info()
+                kwargs = {
+                    "format": fmt,
+                    "channels": channels,
+                    "rate": rate,
+                    "output": True,
+                }
+                if self.output_device_index is not None:
+                    kwargs["output_device_index"] = self.output_device_index
+                self._audio_stream = self._pyaudio.open(**kwargs)
 
-        if output_wavfile:
-            if self._is_engine_mpeg():
-                self.wf = open(output_wavfile, 'wb')
-            else:
-                self.wf = wave.open(output_wavfile, 'wb')
-                _, channels, rate = self.engine.get_stream_info()
-                self.wf.setnchannels(channels) 
-                self.wf.setsampwidth(2)
-                self.wf.setframerate(rate)
+            if self._audio_stream.is_stopped():
+                self._audio_stream.start_stream()
 
-        # Initialize the generated_text variable
-        if reset_generated_text:
-            self.generated_text = ""
+    def _parser_worker(self, external_text_iterator: Iterator[str]):
+        pattern = self._build_sentence_pattern(self._sentence_fragment_delimiters)
+        buffer = ""
 
-        try:
-            # Start the audio player to handle playback
-            self.player.start()
-            self.player.on_audio_chunk = self._on_audio_chunk
+        for chunk in external_text_iterator:
+            if self._shutdown_event.is_set():
+                break
 
-            # Generate sentences from the characters
-            #generate_sentences = s2s.generate_sentences(external_text_iterator, context_size=context_size, minimum_sentence_length=minimum_sentence_length, minimum_first_fragment_length=minimum_first_fragment_length, quick_yield_single_sentence_fragment=fast_sentence_fragment, cleanup_text_links=True, cleanup_text_emojis=True, tokenize_sentences=tokenize_sentences, tokenizer=tokenizer, language=language, log_characters=self.log_characters, sentence_fragment_delimiters=sentence_fragment_delimiters, force_first_fragment_after_words=force_first_fragment_after_words)
+            if not chunk:
+                continue
 
-            # Create the synthesis chunk generator with the given sentences
-            #chunk_generator = self._synthesis_chunk_generator(generate_sentences, buffer_threshold_seconds, log_synthesized_text)
+            buffer += str(chunk)
+            matches = list(re.finditer(pattern, buffer))
+            for match in matches:
+                sentence = self._sanitize_text(match.group(1)).strip()
+                if sentence:
+                    self.sentence_queue.put(sentence)
 
-            self.sentence_queue = queue.Queue()
+            if matches:
+                buffer = re.sub(pattern, "", buffer, count=len(matches))
 
-            def synthesize_worker():
-                while not abort_event.is_set():
-                    sentence = self.sentence_queue.get()
-
-                    synthesis_successful = False
-                    if log_synthesized_text:
-                        logging.info(f"synthesizing: {sentence}")
-
-                    while not synthesis_successful:
-                        try:
-                            if abort_event.is_set():
-                                break
-                            
-                            if before_sentence_synthesized:
-                                before_sentence_synthesized(sentence)
-                            success = self.engine.synthesize(sentence)
-                            if success:
-                                if on_sentence_synthesized:
-                                    on_sentence_synthesized(sentence)
-                                synthesis_successful = True
-                            else:
-                                logging.warning(f"engine {self.engine.engine_name} failed to synthesize sentence \"{sentence}\", unknown error")
-
-                        except Exception as e:
-                            logging.warning(f"engine {self.engine.engine_name} failed to synthesize sentence \"{sentence}\" with error: {e}")
-                            tb_str = traceback.format_exc()
-                            print (f"Traceback: {tb_str}")
-                            print (f"Error: {e}")                                
-
-                        if not synthesis_successful:
-                            if len(self.engines) == 1:
-                                time.sleep(0.2)
-                                logging.warning(f"engine {self.engine.engine_name} is the only engine available, can't switch to another engine")
-                                break
-                            else:
-                                logging.warning(f"fallback engine(s) available, switching to next engine")
-                                self.engine_index = (self.engine_index + 1) % len(self.engines)
-
-                                self.player.stop()
-                                self.load_engine(self.engines[self.engine_index])
-                                self.player.start()
-                                self.player.on_audio_chunk = self._on_audio_chunk
-
-                    self.sentence_queue.task_done()
-
-
-            worker_thread = threading.Thread(target=synthesize_worker)
-            worker_thread.start()      
-
-            import re
-            import emoji
-            def _remove_links(text: str) -> str:
-                pattern = (
-                    r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|'
-                    r'[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-                )
-                return re.sub(pattern, '', text)
-
-            def _remove_emojis(text: str) -> str:
-                return emoji.replace_emoji(text, u'')
-            pattern = f"([^{re.escape(sentence_fragment_delimiters)}]+[{re.escape(sentence_fragment_delimiters)}]+)"
-            # Iterate through the synthesized chunks and feed them to the engine for audio synthesis
-            buffer = ""
-            for chunk in external_text_iterator:
-                buffer += chunk  # Accumulate the chunk into the buffer
-                matches = list(re.finditer(pattern, buffer))  
-                for match in matches:
-                    sentence = _remove_emojis(_remove_links(match.group(1))).strip()
-                    if sentence:
-                        self.sentence_queue.put(sentence)
-
-                buffer = re.sub(pattern, "", buffer, count=len(matches))  # Remove yielded sentences
-
-            # Signal to the worker to stop
-            self.sentence_queue.put(None)
-            worker_thread.join()
-
-        except Exception as e:
-            logging.warning(f"error in play() with engine {self.engine.engine_name}: {e}")
-            tb_str = traceback.format_exc()
-            print (f"Traceback: {tb_str}")
-            print (f"Error: {e}")
-
-        finally:
+    def _synth_worker(self, log_synthesized_text, before_sentence_synthesized, on_sentence_synthesized):
+        while not self._shutdown_event.is_set():
+            sentence = self.sentence_queue.get()
             try:
-            
-                self.player.stop()
+                if sentence is None:
+                    continue
 
-                self.abort_events.remove(abort_event)
-                self.stream_running = False
-                logging.info("stream stop")
+                if log_synthesized_text:
+                    logging.info(f"synthesizing: {sentence}")
 
-                self.output_wavfile = None
-                self.chunk_callback = None
+                if before_sentence_synthesized:
+                    before_sentence_synthesized(sentence)
 
+                success = self.engine.synthesize(sentence)
+                if success and on_sentence_synthesized:
+                    on_sentence_synthesized(sentence)
+            except Exception as exc:
+                logging.warning(f"synthesis failed: {exc}")
             finally:
-                if output_wavfile and self.wf:
-                    self.wf.close()
-                    self.wf = None
+                self.sentence_queue.task_done()
 
-        if is_external_call:
-            if self.on_audio_stream_stop:
-                self.on_audio_stream_stop()
+    def _audio_worker(self):
+        while not self._shutdown_event.is_set():
+            if self._paused_event.is_set():
+                self._writing_audio.clear()
+                time.sleep(0.02)
+                continue
 
-            self.is_playing_flag = False
-            self.play_lock.release()
+            try:
+                chunk = self.engine.queue.get(timeout=0.1)
+            except queue.Empty:
+                self._writing_audio.clear()
+                continue
+
+            try:
+                self._writing_audio.set()
+                self._ensure_audio_stream_started()
+                raw = self._to_bytes(chunk)
+                if raw:
+                    self._audio_stream.write(raw)
+            except Exception as exc:
+                logging.warning(f"audio playback failed: {exc}")
+            finally:
+                self.engine.queue.task_done()
+                self._writing_audio.clear()
+
+    @staticmethod
+    def _build_sentence_pattern(delimiters: str) -> str:
+        escaped = re.escape(delimiters)
+        return f"([^{escaped}]+[{escaped}]+)"
+
+    @staticmethod
+    def _sanitize_text(text: str) -> str:
+        # Strip URLs and non-text symbols that are noisy for TTS.
+        text = re.sub(
+            r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+",
+            "",
+            text,
+        )
+        text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
+        return text
+
+    @staticmethod
+    def _to_bytes(chunk) -> bytes:
+        if chunk is None:
+            return b""
+        if isinstance(chunk, bytes):
+            return chunk
+        if isinstance(chunk, bytearray):
+            return bytes(chunk)
+        if isinstance(chunk, np.ndarray):
+            if chunk.dtype != np.float32:
+                chunk = chunk.astype(np.float32)
+            return np.ascontiguousarray(chunk).tobytes()
+
+        arr = np.asarray(chunk, dtype=np.float32)
+        return np.ascontiguousarray(arr).tobytes()
+
+    @staticmethod
+    def _clear_queue(q: queue.Queue):
+        with q.mutex:
+            q.queue.clear()
 
     def check_player(self):
-        if(not self.player.playback_active):
-            # clear audio buffer before enable player
-            with self.engine.queue.mutex:
-                self.engine.queue.queue.clear()
-            self.player.start()
-            self.player.on_audio_chunk = self._on_audio_chunk
-    
+        self._paused_event.clear()
+        self._ensure_audio_stream_started()
+
     def stop(self):
-        with self.sentence_queue.mutex:
-            self.sentence_queue.queue.clear()
-        self.player.immediate_stop.set()
-        self.player.stop()
-        self.engine.sync()
-        with self.engine.queue.mutex:
-            self.engine.queue.queue.clear()
-        self.player.buffer_manager.clear_buffer()
+        self._paused_event.set()
+        self._clear_queue(self.sentence_queue)
+        self._clear_queue(self.engine.queue)
+
+        try:
+            self.engine.sync()
+        except Exception as exc:
+            logging.warning(f"engine sync failed during stop: {exc}")
+
+        with self._audio_stream_lock:
+            if self._audio_stream and self._audio_stream.is_active():
+                self._audio_stream.stop_stream()
 
     def is_still_playing(self):
-        playing = not (self.player.buffer_manager.audio_buffer.qsize() == 0)
-        # in rare case sentence_queue is not created yet
-        try:
-            playing = playing or self.sentence_queue.qsize() > 0
-        except:
-            pass
-        finally:
-            pass
-        return playing
+        has_pending_sentences = self.sentence_queue.qsize() > 0
+        has_pending_audio = self.engine.queue.qsize() > 0
+        return has_pending_sentences or has_pending_audio or self._writing_audio.is_set()
 
+    def shutdown(self):
+        self._shutdown_event.set()
+        self.stop()
+
+        with self._audio_stream_lock:
+            if self._audio_stream is not None:
+                self._audio_stream.close()
+                self._audio_stream = None
+
+        self._pyaudio.terminate()

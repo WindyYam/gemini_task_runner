@@ -1,162 +1,259 @@
 """
-modified to do transcribe at the beginning of silence detection for faster transcribe
+Local recorder/transcriber used to replace RealtimeSTT dependency.
+Provides the subset of the old interface used by this project.
 """
-from RealtimeSTT import AudioToTextRecorder
-import time
+
 import logging
-import numpy as np
-import os
-import struct
+import threading
+import time
 import collections
-import itertools
-import copy
-import torch
-import signal
+from typing import Callable, Optional
+
+import numpy as np
+import pyaudio
 
 INT16_MAX_ABS_VALUE = 32768.0
-SAMPLE_RATE = 16000
-class FasterAudioRecorder(AudioToTextRecorder):
-    def _recording_worker(self):
-        """
-        The main worker method which constantly monitors the audio
-        input for voice activity and accordingly starts/stops the recording.
-        """
 
-        logging.debug('Starting recording worker')
-        if not hasattr(self, "transcribe_count"):
-            self.transcribe_count = 0
-        if not hasattr(self, "recording_judger"):
-            self.recording_judger = lambda : True
-        if not hasattr(self, "silero_off_sensitivity"):
-            self.silero_off_sensitivity = self.silero_sensitivity
-        try:
-            was_recording = False
-            delay_was_passed = False
 
-            # Continuously monitor audio for voice activity
-            while self.is_running:
+class FasterAudioRecorder:
+    def __init__(
+        self,
+        spinner=False,
+        model="medium",
+        language="",
+        silero_sensitivity=0.3,
+        silero_use_onnx=True,
+        webrtc_sensitivity=1,
+        post_speech_silence_duration=0.4,
+        min_length_of_recording=0.5,
+        min_gap_between_recordings=0,
+        compute_type="default",
+        input_device_index=None,
+        on_recording_start=None,
+        sample_rate=16000,
+        chunk_size=1024,
+        **kwargs,
+    ):
+        del spinner, silero_use_onnx, webrtc_sensitivity, min_gap_between_recordings, kwargs
 
-                try:
+        self.model_name = model
+        self.language = language or None
+        self.compute_type = "auto" if compute_type == "default" else compute_type
+        self.input_device_index = input_device_index
+        self.on_recording_start = on_recording_start
 
-                    data = self.audio_queue.get()
-                    if self.on_recorded_chunk:
-                        self.on_recorded_chunk(data)
+        self.sample_rate = sample_rate
+        self.chunk_size = chunk_size
+        self.post_speech_silence_duration = post_speech_silence_duration
+        self.min_length_of_recording = min_length_of_recording
+        self.pre_roll_duration = 0.25
+        self.start_speech_frames = 2
 
-                    if self.handle_buffer_overflow:
-                        # Handle queue overflow
-                        if (self.audio_queue.qsize() >
-                                self.allowed_latency_limit):
-                            logging.warning("Audio queue size exceeds "
-                                            "latency limit. Current size: "
-                                            f"{self.audio_queue.qsize()}. "
-                                            "Discarding old audio chunks."
-                                            )
+        self.silero_sensitivity = silero_sensitivity
+        self.silero_off_sensitivity = silero_sensitivity
 
-                        while (self.audio_queue.qsize() >
-                                self.allowed_latency_limit):
+        self.recording_judger: Callable[[], bool] = lambda: True
 
-                            data = self.audio_queue.get()
+        self.audio = np.array([], dtype=np.float32)
+        self.frames = []
 
-                except BrokenPipeError:
-                    print("BrokenPipeError _recording_worker")
-                    self.is_running = False
-                    break
-                allow_record = self.recording_judger()
-                if not allow_record:
-                    self.is_recording = False
-                    self.start_recording_on_voice_activity = True
-                    self.frames.clear()
-                    continue
+        self.is_recording = False
+        self._manual_mode = False
 
-                if not self.is_recording:
-                    # Check for voice activity to
-                    # trigger the start of recording
+        self._record_stop_event = threading.Event()
+        self._record_thread: Optional[threading.Thread] = None
 
-                    if self._is_silero_speech(data[:]):
-                        logging.info("voice activity detected")
+        self._state = "inactive"
+        self.last_transcription_bytes = None
 
-                        self.start()
-                    else:
-                        pass
+        self._pyaudio = pyaudio.PyAudio()
+        self._stream = self._pyaudio.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=self.sample_rate,
+            input=True,
+            input_device_index=self.input_device_index,
+            frames_per_buffer=self.chunk_size,
+        )
 
-                    self.speech_end_silence_start = 0
+        self._whisper_model = None
 
+    def _set_state(self, state: str):
+        self._state = state
+
+    @staticmethod
+    def _preprocess_output(text: str) -> str:
+        return (text or "").strip()
+
+    def _energy(self, pcm_bytes: bytes) -> float:
+        pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
+        if pcm.size == 0:
+            return 0.0
+        return float(np.sqrt(np.mean((pcm.astype(np.float32) / INT16_MAX_ABS_VALUE) ** 2)))
+
+    def _speech_threshold(self) -> float:
+        # Higher sensitivity means lower threshold.
+        return max(0.003, 0.015 * (1.0 - float(self.silero_sensitivity)))
+
+    def _silence_threshold(self) -> float:
+        return max(0.0025, 0.012 * (1.0 - float(self.silero_off_sensitivity)))
+
+    def _finalize_frames(self, frames):
+        if not frames:
+            self.audio = np.array([], dtype=np.float32)
+            return
+        audio_i16 = np.frombuffer(b"".join(frames), dtype=np.int16)
+        self.audio = (audio_i16.astype(np.float32) / INT16_MAX_ABS_VALUE).copy()
+
+    def _manual_record_worker(self):
+        local_frames = []
+        while not self._record_stop_event.is_set():
+            if not self.recording_judger():
+                time.sleep(0.01)
+                continue
+            data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+            local_frames.append(data)
+
+        self.frames = local_frames
+        self._finalize_frames(local_frames)
+        self.is_recording = False
+        self._set_state("inactive")
+
+    def start(self):
+        if self.is_recording:
+            return
+        if not self.recording_judger():
+            return
+
+        self._manual_mode = True
+        self.frames = []
+        self.audio = np.array([], dtype=np.float32)
+        self._record_stop_event.clear()
+        self.is_recording = True
+        self._set_state("recording")
+
+        if self.on_recording_start:
+            try:
+                self.on_recording_start()
+            except Exception as exc:
+                logging.warning(f"on_recording_start failed: {exc}")
+
+        self._record_thread = threading.Thread(target=self._manual_record_worker, daemon=True)
+        self._record_thread.start()
+
+    def stop(self):
+        if not self.is_recording:
+            return
+        self._record_stop_event.set()
+
+    def wait_audio(self):
+        # Manual push-to-talk mode: wait until stop() ended recording thread.
+        if self._manual_mode:
+            if self._record_thread:
+                self._record_thread.join()
+            self._manual_mode = False
+            return
+
+        # Auto mode: block until voice activity then stop after silence.
+        self.frames = []
+        self.audio = np.array([], dtype=np.float32)
+        speech_started = False
+        speech_threshold_base = self._speech_threshold()
+        silence_threshold_base = self._silence_threshold()
+        frame_seconds = self.chunk_size / float(self.sample_rate)
+        end_silence_frames = max(1, int(self.post_speech_silence_duration / frame_seconds))
+        pre_roll_frames = max(1, int(self.pre_roll_duration / frame_seconds))
+
+        pre_buffer = collections.deque(maxlen=pre_roll_frames)
+        consecutive_speech = 0
+        consecutive_silence = 0
+        noise_floor = 0.004
+
+        while True:
+            if not self.recording_judger():
+                time.sleep(0.01)
+                continue
+
+            data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+            e = self._energy(data)
+            speech_threshold = max(speech_threshold_base, noise_floor * 3.0)
+            silence_threshold = max(silence_threshold_base, noise_floor * 1.8)
+
+            if not speech_started:
+                pre_buffer.append(data)
+                if e >= speech_threshold:
+                    consecutive_speech += 1
                 else:
-                    # If we are currently recording
-                    if self._is_not_silero_speech(data[:]):
-                        # Voice deactivity was detected, so we start
-                        # measuring silence time before stopping recording
-                        if self.speech_end_silence_start == 0:
-                            self.speech_end_silence_start = time.time()
-                            if  (len(self.frames) > 0):
-                                # remove pending
-                                while self.parent_transcription_pipe.poll():
-                                    status, result = self.parent_transcription_pipe.recv()
-                                    self.transcribe_count -= 1
-                                audio_array = np.frombuffer(b''.join(self.frames), dtype=np.int16)
-                                audio = audio_array.astype(np.float32) / INT16_MAX_ABS_VALUE
-                                self.parent_transcription_pipe.send((audio, self.language))
-                                self.transcribe_count += 1
+                    consecutive_speech = 0
+                    noise_floor = 0.98 * noise_floor + 0.02 * e
 
-                    else:
-                        self.speech_end_silence_start = 0
-
-                    # Wait for silence to stop recording after speech
-                    if self.speech_end_silence_start and time.time() - \
-                            self.speech_end_silence_start > \
-                            self.post_speech_silence_duration:
-                        logging.info("voice deactivity detected")
-                        self.stop()
-
-                if self.is_recording:
+                if consecutive_speech >= self.start_speech_frames:
+                    speech_started = True
+                    self.is_recording = True
+                    self._set_state("recording")
+                    if self.on_recording_start:
+                        try:
+                            self.on_recording_start()
+                        except Exception as exc:
+                            logging.warning(f"on_recording_start failed: {exc}")
+                    # Keep a short pre-roll so the utterance start is not clipped.
+                    self.frames.extend(pre_buffer)
                     self.frames.append(data)
+                continue
 
-        except Exception as e:
-            if not self.interrupt_stop_event.is_set():
-                logging.error(f"Unhandled exeption in _recording_worker: {e}")
-                raise
-    
+            self.frames.append(data)
+            if e < silence_threshold:
+                consecutive_silence += 1
+                if consecutive_silence >= end_silence_frames:
+                    break
+            else:
+                consecutive_silence = 0
+
+        self._finalize_frames(self.frames)
+        self.is_recording = False
+        self._set_state("inactive")
+
+    def _get_whisper_model(self):
+        if self._whisper_model is None:
+            from faster_whisper import WhisperModel
+
+            self._whisper_model = WhisperModel(self.model_name, compute_type=self.compute_type)
+        return self._whisper_model
+
     def transcribe(self) -> str:
         self._set_state("transcribing")
-        audio_copy = copy.deepcopy(self.audio)
-        if self.transcribe_count == 0:
-            self.parent_transcription_pipe.send((self.audio, self.language))
-            self.transcribe_count += 1
-        while self.transcribe_count > 0:
-            status, result = self.parent_transcription_pipe.recv()
-            self.transcribe_count -= 1
-            
-        self._set_state("inactive")
-        if status == 'success':
-            self.last_transcription_bytes = audio_copy
-            return self._preprocess_output(result)
-        else:
-            logging.error(result)
-            raise Exception(result)
-        
-    def _is_not_silero_speech(self, chunk):
-        """
-        This is similiar to is_silero_speech but use a different threshold
-        """
-        if self.sample_rate != 16000:
-            pcm_data = np.frombuffer(chunk, dtype=np.int16)
-            data_16000 = signal.resample_poly(
-                pcm_data, 16000, self.sample_rate)
-            chunk = data_16000.astype(np.int16).tobytes()
+        try:
+            if self.audio.size == 0:
+                return ""
 
-        self.silero_working = True
-        audio_chunk = np.frombuffer(chunk, dtype=np.int16)
-        audio_chunk = audio_chunk.astype(np.float32) / INT16_MAX_ABS_VALUE
-        vad_prob = self.silero_vad_model(
-            torch.from_numpy(audio_chunk),
-            SAMPLE_RATE).item()
-        is_not_silero_speech_active = vad_prob < (1 - self.silero_off_sensitivity)
-        self.silero_working = False
-        return is_not_silero_speech_active
-    
-    #For dynamic judgement of fast transcribe during recording. since I don't want it to transcribe when the AI is speaking at the same time, which can cause performance issue on my PC
+            min_samples = int(self.min_length_of_recording * self.sample_rate)
+            if self.audio.size < min_samples:
+                return ""
+
+            model = self._get_whisper_model()
+            segments, _ = model.transcribe(self.audio, language=self.language)
+            text = " ".join(segment.text for segment in segments)
+            self.last_transcription_bytes = self.audio.copy()
+            return self._preprocess_output(text)
+        finally:
+            self._set_state("inactive")
+
+    # Kept for compatibility with old custom recorder behavior.
     def set_recording_judger(self, judger):
         self.recording_judger = judger
 
     def set_silero_off_sensitivity(self, off_sens):
         self.silero_off_sensitivity = off_sens
+
+    def __del__(self):
+        try:
+            if self._stream is not None:
+                self._stream.stop_stream()
+                self._stream.close()
+        except Exception:
+            pass
+        try:
+            if self._pyaudio is not None:
+                self._pyaudio.terminate()
+        except Exception:
+            pass

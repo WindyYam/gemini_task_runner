@@ -712,11 +712,11 @@ You are to answer questions in a short concise way, and talk more naturally'''
                     # need to filter out ```` code blocks
                     inside_block = False
 
-                    print("AI: ", end='')
+                    print("AI: ", end='', flush=True)
 
                     for chunk in response:
                         chunkText = chunk.text
-                        print(chunkText, end='')
+                        print(chunkText, end='', flush=True)
                         responseTextContainer[0] += chunkText
                         result = ""
                         i = 0
@@ -732,8 +732,9 @@ You are to answer questions in a short concise way, and talk more naturally'''
                                 i += 1
                         if result:  # Only yield non-empty results
                             text_to_speech.feed(result)
+                    print(flush=True)
 
-                if response is str:
+                if isinstance(response, str):
                     responseText = response
                 else:
                     try:

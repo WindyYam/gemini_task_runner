@@ -543,44 +543,40 @@ class AutoLangCoquiEngine(BaseEngine):
                 elif command == 'synthesize':
                     def detect_language(text, english_threshold=0.5):
                         """
-                        Detect whether a text is primarily English or Chinese based on English character analysis.
+                        Default to English unless Chinese characters are detected.
                         
                         Parameters:
                             text (str): The input text to analyze
-                            english_threshold (float): The threshold proportion of English characters to classify as English (default: 0.5)
+                            english_threshold (float): Kept for backward compatibility (unused).
                         
                         Returns:
-                            str: 'en' if the proportion of English characters exceeds the threshold, 'zh-cn' otherwise
-                            float: The actual proportion of English characters in the text
+                            str: 'zh-cn' if Chinese characters are detected, 'en' otherwise
+                            float: The proportion of Chinese characters in non-whitespace text
                         """
                         if not text:
                             return 'en', 0.0
-                        
-                        def is_english_char(char):
-                            """Check if a character is English (a-z, A-Z) or common English punctuation."""
-                            # Basic English letters
-                            if char.isascii() and char.isalpha():
-                                return True
-                            
-                            # Common English punctuation and symbols
-                            english_punctuation = set(".,!?'-\"()[]{}:;")
-                            if char in english_punctuation:
-                                return True
-                                
-                            return False
-                        
-                        # Count meaningful characters (excluding whitespace)
-                        total_chars = len([c for c in text if c.strip() and not c.isnumeric()])
-                        
+
+                        def is_chinese_char(char):
+                            code = ord(char)
+                            return (
+                                0x3400 <= code <= 0x4DBF or   # CJK Unified Ideographs Extension A
+                                0x4E00 <= code <= 0x9FFF or   # CJK Unified Ideographs
+                                0xF900 <= code <= 0xFAFF or   # CJK Compatibility Ideographs
+                                0x20000 <= code <= 0x2A6DF or # CJK Unified Ideographs Extension B
+                                0x2A700 <= code <= 0x2B73F or # CJK Unified Ideographs Extension C
+                                0x2B740 <= code <= 0x2B81F or # CJK Unified Ideographs Extension D
+                                0x2B820 <= code <= 0x2CEAF or # CJK Unified Ideographs Extension E/F
+                                0x2F800 <= code <= 0x2FA1F    # CJK Compatibility Ideographs Supplement
+                            )
+
+                        total_chars = len([c for c in text if c.strip()])
                         if total_chars == 0:
                             return 'en', 0.0
-                        
-                        # Count English characters
-                        english_chars = sum(1 for c in text if is_english_char(c))
-                        english_proportion = english_chars / total_chars
-                        
-                        return ('en' if english_proportion >= english_threshold else 'zh-cn', 
-                                english_proportion)
+
+                        chinese_chars = sum(1 for c in text if is_chinese_char(c))
+                        chinese_proportion = chinese_chars / total_chars
+
+                        return ('zh-cn' if chinese_chars > 0 else 'en', chinese_proportion)
 
                     text = data['text']
                     language, probablity = detect_language(text, 0.8)

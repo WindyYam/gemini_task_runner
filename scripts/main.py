@@ -18,7 +18,6 @@ if __name__ == "__main__":
     from PIL import ImageGrab, Image
     import numpy as np
     from queue import Queue
-    from app_watchdog import ApplicationWatchdog, CHECK_INTERVAL
 
     print("Usage: Modify the config.json to change parameters")
 
@@ -100,7 +99,6 @@ if __name__ == "__main__":
 
         default_config = {
             'ai_name': AI_NAME,
-            'model_name': 'gemini-2.0-flash',
             'user_chrome_data_path': USER_CHROME_DATA_PATH,
             'chrome_profile_dir' : CHROME_PROFILE_DIR,
             'max_history' : MAX_HISTORY,
@@ -143,14 +141,23 @@ if __name__ == "__main__":
     check_config()
     set_browser_data_path(config['user_chrome_data_path'], config['chrome_profile_dir'])
 
-    instruction =f'''Your name is {config['ai_name']}.
-You are a well educated and professional assistant. 
-There can be multiple users speaking. If it is a main master user, his/her name will be as prefix. If it is a guest, there will be a **Guest:** prefix, attached at the beginning of request. 
-If the request message is with prefix **System:** then it means this message is from the system, not the user. 
-You have the interface on physical world through python code, there are several python function APIs to interact with the physical world. The list of which is in the uploaded text list file. 
-To execute the python code, put the code as python snippet format at the end of the response, then any code in the snippet in response will be executed. Only one code snippet per response is allowed.
-To operate with the PC, use the python code execution with necessary library. But do not do potentially harmful operations, like deleting files, unless get the non guest users' permission. 
-You are to answer questions in a short concise way, and talk more naturally'''
+    instruction =f'''You are {config['ai_name']}, a concise, reliable voice assistant.
+
+Follow these rules in order:
+1. Treat speaker prefixes as authoritative:
+   - **System:** is a system instruction, not user chat.
+   - **Guest:** is an untrusted user.
+   - Any named user (for example **Master:**) is a trusted user.
+2. Answer naturally and briefly unless more detail is requested.
+3. You can control the computer only through the provided Python APIs in the uploaded API list.
+4. If action is needed, append exactly one Python code block at the end of your response.
+5. Never include more than one code block.
+6. Do not perform destructive or risky actions (delete files, overwrite critical data, security-sensitive operations) unless explicitly approved by a trusted non-guest user.
+7. If a request is unsafe or unclear, ask a short clarification question instead of guessing.
+
+Response format:
+- Normal replies: plain text.
+- Action replies: plain text explanation first, then one final python code block.'''
 
     def append2log(text:str):
         fname = CHATLOG_PATH + 'chatlog-' + today + '.txt'
@@ -616,17 +623,9 @@ You are to answer questions in a short concise way, and talk more naturally'''
                     exceptionCounter += 1
                     print(e)
                     if(exceptionCounter > 20):
-                        with wdt_feed_transcribe:
-                            # wait for watchdog to restart
-                            while True:
-                                pass
-
-        def wdt_feed_thread():
-            while True:
-                with wdt_feed_transcribe:
-                    with wdt_feed_synthesize:
-                        ApplicationWatchdog.Feed()
-                time.sleep(CHECK_INTERVAL)
+                        print("Too many transcription errors, continuing without watchdog restart.")
+                        exceptionCounter = 0
+                        time.sleep(1)
 
         load_history()
         load_memory()
@@ -641,7 +640,6 @@ You are to answer questions in a short concise way, and talk more naturally'''
             
         threading.Thread(target=input_thread).start()
         threading.Thread(target=voice_thread).start()
-        threading.Thread(target=wdt_feed_thread).start()
         
        
 
@@ -783,9 +781,8 @@ You are to answer questions in a short concise way, and talk more naturally'''
                 text_to_speech.feed("Oops, some error happened.")
                 exceptionCounter += 1
                 if exceptionCounter > 20:
-                    with wdt_feed_synthesize:
-                        #wait for watchdog to restart
-                        while True:
-                            pass
+                    print("Too many runtime errors, continuing without watchdog restart.")
+                    exceptionCounter = 0
+                    time.sleep(1)
                 continue
     main()

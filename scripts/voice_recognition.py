@@ -26,7 +26,7 @@ class VoiceRecognition:
             'silero_use_onnx': True,
             'webrtc_sensitivity': 1,
             'post_speech_silence_duration': 0.4,
-            'min_length_of_recording': 0.5,
+            'min_length_of_recording': 0.2,
             'min_gap_between_recordings': 0,
             "compute_type" : "default",
             'input_device_index': device_index,

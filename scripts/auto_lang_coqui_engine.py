@@ -1,4 +1,5 @@
 from tts_engine_base import BaseEngine
+import argparse
 import torch.multiprocessing as mp
 from threading import Lock, Thread
 from typing import Union, List
@@ -16,8 +17,34 @@ import io
 import os
 import re
 import threading
+import queue
+from contextlib import contextmanager
 
 TIME_SLEEP_DEVICE_RESET = 2
+
+
+@contextmanager
+def _legacy_torch_load_compat(enabled=True):
+    """Force torch.load(..., weights_only=False) for legacy checkpoints.
+
+    Coqui XTTS checkpoints can require full-object unpickling with newer
+    PyTorch versions where weights_only defaults to True.
+    """
+    if not enabled:
+        yield
+        return
+
+    original_torch_load = torch.load
+
+    def _torch_load_with_legacy_defaults(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_torch_load(*args, **kwargs)
+
+    torch.load = _torch_load_with_legacy_defaults
+    try:
+        yield
+    finally:
+        torch.load = original_torch_load
 
 
 class QueueWriter(io.TextIOBase):
@@ -366,6 +393,16 @@ class AutoLangCoquiEngine(BaseEngine):
                             gpt_cond_latent, speaker_embedding = speaker_manager.speakers[predefined_voice].values()
                             return gpt_cond_latent, speaker_embedding
 
+                    if predefined_voices:
+                        logging.info(
+                            "No local cloning source found; using predefined XTTS speaker '%s'.",
+                            predefined_voices[0],
+                        )
+                        speaker_file_path = os.path.join(checkpoint, "speakers_xtts.pth")
+                        speaker_manager = SpeakerManager(speaker_file_path)
+                        gpt_cond_latent, speaker_embedding = speaker_manager.speakers[predefined_voices[0]].values()
+                        return gpt_cond_latent, speaker_embedding
+
                     if len(filename) > 0:
                         logging.info(f"Using default voice, both {filename_voice_json} and {filename_voice_wav} not found.")
                     else:
@@ -415,13 +452,16 @@ class AutoLangCoquiEngine(BaseEngine):
                         logging.debug(f"Added {filename_voice_wav} (#{len(audio_path_list)}) to audio_path_list")
 
                 if len(audio_path_list) == 0:
-                    logging.info(f"Using default female voice, no cloning source specified.")
-
-                    # Get the directory of the current script
-                    current_dir = os.path.dirname(os.path.realpath(__file__))
-                    filename_voice_json = os.path.join(current_dir, "coqui_default_voice.json")
-                    if not os.path.exists(filename_voice_json):
-                        raise ValueError(f"Default voice file {filename_voice_json} not found.")                
+                    if predefined_voices:
+                        logging.info(
+                            "No local cloning source found; using predefined XTTS speaker '%s'.",
+                            predefined_voices[0],
+                        )
+                        speaker_file_path = os.path.join(checkpoint, "speakers_xtts.pth")
+                        speaker_manager = SpeakerManager(speaker_file_path)
+                        gpt_cond_latent, speaker_embedding = speaker_manager.speakers[predefined_voices[0]].values()
+                        return gpt_cond_latent, speaker_embedding
+                    raise ValueError("No cloning source provided and no predefined XTTS speakers are available.")
 
                 # compute and write latents to json file
                 logging.debug(f"Computing latents for {filename}")
@@ -475,14 +515,15 @@ class AutoLangCoquiEngine(BaseEngine):
                 tts = setup_tts_model(config)
                 logging.debug(f"  xtts load_checkpoint({checkpoint})")
 
-                tts.load_checkpoint(
-                    config,
-                    checkpoint_dir=checkpoint,
-                    checkpoint_path=None,
-                    vocab_path=None,
-                    eval=True,
-                    use_deepspeed=use_deepspeed
-                )
+                with _legacy_torch_load_compat(enabled=True):
+                    tts.load_checkpoint(
+                        config,
+                        checkpoint_dir=checkpoint,
+                        checkpoint_path=None,
+                        vocab_path=None,
+                        eval=True,
+                        use_deepspeed=use_deepspeed
+                    )
                 tts.to(torch_device)
             except Exception as e:
                 print(f"Error loading model for checkpoint {checkpoint}: {e}")
@@ -1006,3 +1047,114 @@ class AutoLangCoquiEngine(BaseEngine):
         for speaker_name in speaker_manager.name_to_id:
             self.voices_list.append(speaker_name)
         return self.voices_list
+
+
+def _parse_log_level(level_name: str):
+    level_value = getattr(logging, level_name.upper(), None)
+    if not isinstance(level_value, int):
+        raise ValueError(f"Invalid log level: {level_name}")
+    return level_value
+
+
+def _create_argument_parser():
+    parser = argparse.ArgumentParser(
+        description="Interactive input-synthesis loop for AutoLangCoquiEngine.")
+    parser.add_argument("--model-name", default="tts_models/multilingual/multi-dataset/xtts_v2")
+    parser.add_argument("--specific-model", default="v2.0.3")
+    parser.add_argument("--local-models-path", default=None)
+    parser.add_argument("--voices-path", default=None)
+    parser.add_argument("--voice", default="")
+    parser.add_argument("--language", default="en")
+    parser.add_argument("--speed", type=float, default=1.0)
+    parser.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None)
+    parser.add_argument("--log-level", default="WARNING")
+    return parser
+
+
+def _playback_worker(engine: AutoLangCoquiEngine, stop_event: threading.Event):
+    audio = pyaudio.PyAudio()
+    audio_format, channels, sample_rate = engine.get_stream_info()
+    stream = audio.open(
+        format=audio_format,
+        channels=channels,
+        rate=sample_rate,
+        output=True,
+    )
+
+    try:
+        while not stop_event.is_set() or not engine.queue.empty():
+            try:
+                chunk = engine.queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            stream.write(chunk)
+    finally:
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+
+
+def main():
+    parser = _create_argument_parser()
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=_parse_log_level(args.log_level),
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    engine = None
+    stop_playback = threading.Event()
+    playback_thread = None
+
+    try:
+        engine = AutoLangCoquiEngine(
+            model_name=args.model_name,
+            specific_model=args.specific_model,
+            local_models_path=args.local_models_path,
+            voices_path=args.voices_path,
+            voice=args.voice,
+            language=args.language,
+            speed=args.speed,
+            device=args.device,
+            level=_parse_log_level(args.log_level),
+        )
+
+        playback_thread = Thread(
+            target=_playback_worker,
+            args=(engine, stop_playback),
+            daemon=True,
+        )
+        playback_thread.start()
+
+        print("Interactive TTS loop started. Type text and press Enter.")
+        print("Type 'exit' or 'quit' to stop.")
+
+        while True:
+            try:
+                text = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nStopping input loop.")
+                break
+
+            if not text:
+                continue
+
+            if text.lower() in {"exit", "quit"}:
+                break
+
+            ok = engine.synthesize(text)
+            if not ok:
+                logging.error("Synthesis failed for input: %s", text)
+
+    finally:
+        stop_playback.set()
+        if playback_thread is not None:
+            playback_thread.join(timeout=2)
+
+        if engine is not None:
+            engine.shutdown()
+
+
+if __name__ == "__main__":
+    main()

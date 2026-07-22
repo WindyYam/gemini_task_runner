@@ -13,3 +13,4 @@ pyaudio==0.2.14
 opencv-python==4.10.0.84
 numpy==1.26.4
 ddgs==9.6.1
+transformers==4.40.2

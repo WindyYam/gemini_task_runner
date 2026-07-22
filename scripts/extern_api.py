@@ -5,8 +5,12 @@ from bs4 import BeautifulSoup
 import json
 import test_game
 from urllib.parse import quote_plus
+from pathlib import Path
 
 player = None
+PROJECT_PATH = Path(__file__).resolve().parent.parent
+USER_CHROME_DATA_PATH = str(PROJECT_PATH / 'Chrome_User_Data')
+PROFILE_DIR = 'Default'
 
 house = {
     'light_state' : False,

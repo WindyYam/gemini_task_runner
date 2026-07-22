@@ -96,7 +96,7 @@ if __name__ == "__main__":
         AI_NAME = 'Jarvis'
         TARGET_CAMERA = 'DroidCam Video'
         SERVER_URL = 'http://192.168.1.219:11434/api/generate'
-        USER_CHROME_DATA_PATH = 'C:\\Users\\zhenya.yang\\AppData\\Local\\Google\\Chrome\\User Data'
+        USER_CHROME_DATA_PATH = str(Path(__file__).resolve().parent.parent / 'Chrome_User_Data')
         CHROME_PROFILE_DIR = 'Default'
         RECORDER_DEVICE = None
         SPEAKER_DEVICE = None

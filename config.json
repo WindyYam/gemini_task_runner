@@ -1,6 +1,6 @@
 {
   "ai_name": "Jarvis",
-  "user_chrome_data_path": "C:\\Users\\zhenya.yang\\AppData\\Local\\Google\\Chrome\\User Data",
+  "user_chrome_data_path": "C:\\MySource\\gemini_voice_companion\\Chrome_User_Data",
   "chrome_profile_dir": "Default",
   "max_history": 20,
   "max_memory": 10,

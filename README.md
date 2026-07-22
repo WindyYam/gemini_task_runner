@@ -37,7 +37,7 @@ Discord Video Vision: https://youtu.be/La9BApz4LbY
 - **Information Lookup**: Search for information on the internet, like weather, news.
 - **Navigate Browser**: Use together with information lookup, you can navigate to the search result webpage, e.g. news, youtube page, Wikipeda. 
 - **Summarize Webpage**: Use together with information lookup, you can ask the AI to get the content from static webpage and summarize it.
-- **Spotify Integration**: Play and control music on Spotify.
+- **YouTube Music Integration**: Play and control music on YouTube Music.
 - **Google Map Functions**: Some simple google map functions, like locate yourself, search for nearby stores. To use this, keep in mind that Google Map on your PC doesn't have GPS location. To access your location, you can let it access your mobile phone's, by login in Chrome and your mobile Google Map with the same account, and keep your mobile google map on, then the Google Map on PC will be able to locate you with your device. You might ask what's the point to locate yourself if you already open Google Map on your mobile, well, simply so that the AI can talk based on your location context.
 - **PC Keyboard Control**: Type content onto your PC using voice commands.
 - **Take Picture**: Either take a photo from the camera, or take a screenshot of your PC, which will then get uploaded to gemini. For better experience, recommend to download ```DroidCam https://droidcam.app/``` to turn your mobile phone into a camera. Update: DroidCam has some issue in getting camera frames when it is not in vision mode. Now since discord can do video call that turn your mobile phone into camera, the recommend way of using the mobile phone camera is discord mobile video call -> PC discord preview fullscreen -> ask AI on PC to take screenshot and analyze.
@@ -64,7 +64,7 @@ Added: You might also need to install cuDNN for some libraries if you encounter 
 2. Run `manage_user.bat` to add/delete user voice for AI to recognize. You can add multiple users.
 3. Use any text editor to open and configure through `config.json` for several parameters. You should modify `user_chrome_data_path` to point to your chrome user profile. You can't use default profile for this, either copy your chrome user profile to somewhere like `C:/YourCustomProfileFolder/MyProfile`, or use command: `PATH_TO_YOUR_CHROME/chrome.exe --user-data-dir="C:/YourCustomProfileFolder/MyProfile" --profile-directory="Default"` to create a new one. Then copy the path `C:/YourCustomProfileFolder/MyProfile` to replace the existing in `user_chrome_data_path`.
 4. Run `run.bat`. Make sure you've GEMINI_API_KEY variable in step 1.
-5. When using Chrome related features(such as playing spotify music, navigate webpage), make sure you have Google Chrome installed, Spotify logged in, and Chrome is closed before doing AI Chrome features.
+5. When using Chrome related features(such as playing YouTube Music, navigate webpage), make sure you have Google Chrome installed, YouTube Music accessible in Chrome, and Chrome is closed before doing AI Chrome features.
 
 ### Modes
 

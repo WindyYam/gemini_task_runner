@@ -72,8 +72,12 @@ if __name__ == "__main__":
     power_on_sound = pygame.mixer.Sound(f"{SOUNDS_PATH}poweron.mp3")
     today = str(date.today())
     evt_enter = threading.Event()
-    wdt_feed_transcribe = threading.Lock()
-    wdt_feed_synthesize = threading.Lock()
+    camera_lock = threading.Lock()
+    camera_session = {
+        'camera': None,
+        'device': None,
+        'started': False,
+    }
 
     # Create the folder if it doesn't exist
     os.makedirs(TEMP_PATH, exist_ok=True)
@@ -215,16 +219,142 @@ Response format:
         else:
             print("Too many system message call in a row!")
 
-    def vision_mode(on:bool, type:str):
-        if type == 'camera':
-            context['vision_mode_camrea_is_screen'] = False
-        else:
-            context['vision_mode_camrea_is_screen'] = True
+    def ensure_camera_session(prewarm: bool = False):
+        def _release_locked():
+            if camera_session['camera'] is None:
+                camera_session['device'] = None
+                camera_session['started'] = False
+                camera_session['provider'] = None
+                return
+            try:
+                provider = camera_session.get('provider')
+                if provider == 'cv2':
+                    camera_session['camera'].release()
+                else:
+                    camera_session['camera'].stop()
+            except Exception as e:
+                print(f'Warning: camera release failed: {e}')
+            camera_session['camera'] = None
+            camera_session['device'] = None
+            camera_session['started'] = False
+            camera_session['provider'] = None
 
-        if(on):
-            context['vision_mode'] = True
+        with camera_lock:
+            if camera_session['camera'] is not None and camera_session['started']:
+                return camera_session['camera']
+
+        # Prefer OpenCV with DirectShow on Windows for better stability than MSMF.
+        try:
+            import cv2
+            target_raw = str(config.get('target_camera') or '').strip()
+            preferred_indexes = []
+            if target_raw.isdigit():
+                preferred_indexes.append(int(target_raw))
+            preferred_indexes.extend([0, 1, 2, 3, 4])
+
+            for idx in dict.fromkeys(preferred_indexes):
+                cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                if not cap or not cap.isOpened():
+                    if cap:
+                        cap.release()
+                    continue
+
+                # Smaller fixed resolution usually improves webcam reliability and latency.
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+                ok = False
+                for _ in range(5):
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        ok = True
+                        break
+                    pygame.time.wait(40)
+
+                if not ok:
+                    cap.release()
+                    continue
+
+                with camera_lock:
+                    _release_locked()
+                    camera_session['camera'] = cap
+                    camera_session['device'] = idx
+                    camera_session['started'] = True
+                    camera_session['provider'] = 'cv2'
+
+                print(f'Vision camera ready (cv2-dshow): index {idx}')
+                return cap
+        except Exception as cv2_err:
+            print(f'cv2 camera init failed, fallback to pygame camera: {cv2_err}')
+
+        # Fallback: pygame camera backend.
+        import pygame.camera
+
+        if hasattr(pygame.camera, 'is_init'):
+            if not pygame.camera.is_init():
+                pygame.camera.init()
+        elif hasattr(pygame.camera, 'get_init'):
+            if not pygame.camera.get_init():
+                pygame.camera.init()
         else:
-            context['vision_mode'] = False
+            pygame.camera.init()
+
+        cameras = pygame.camera.list_cameras()
+        if not cameras:
+            raise RuntimeError('No camera device found')
+
+        target_name = str(config.get('target_camera') or '').lower()
+        selected_camera = cameras[0]
+        if target_name:
+            for camera_name in cameras:
+                if target_name in str(camera_name).lower():
+                    selected_camera = camera_name
+                    break
+
+        with camera_lock:
+            _release_locked()
+            camera = pygame.camera.Camera(selected_camera)
+            camera.start()
+            camera_session['camera'] = camera
+            camera_session['device'] = selected_camera
+            camera_session['started'] = True
+            camera_session['provider'] = 'pygame'
+
+            if prewarm:
+                # Warm up once when enabling camera mode for lower first-frame latency.
+                pygame.time.wait(120)
+                camera.get_image()
+
+        print(f'Vision camera ready (pygame): {selected_camera}')
+        return camera
+
+    def release_camera_session():
+        with camera_lock:
+            if camera_session['camera'] is not None and camera_session['started']:
+                try:
+                    if camera_session.get('provider') == 'cv2':
+                        camera_session['camera'].release()
+                    else:
+                        camera_session['camera'].stop()
+                except Exception as e:
+                    print(f'Warning: camera stop failed: {e}')
+            camera_session['camera'] = None
+            camera_session['device'] = None
+            camera_session['started'] = False
+            camera_session['provider'] = None
+
+    def vision_mode(on:bool, type:str):
+        use_camera = (type == 'camera')
+        context['vision_mode_camrea_is_screen'] = not use_camera
+        context['vision_mode'] = bool(on)
+
+        if context['vision_mode'] and use_camera:
+            try:
+                ensure_camera_session(prewarm=True)
+            except Exception as e:
+                print(f'Camera pre-init failed: {e}')
+        else:
+            release_camera_session()
 
     def screenshot() -> str:
         filename = os.path.join(
@@ -245,8 +375,107 @@ Response format:
         return 'file:' + filename
 
     def camera_shot() -> str:
-        # Fallback to desktop screenshot when no camera capture provider is configured.
+        filename = os.path.join(
+            IMAGE_PATH,
+            f"camera-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.jpg",
+        )
+
+        def grab_fresh_frame_pygame(camera):
+            # Some backends can return a stale buffered frame when the camera is kept open.
+            # Drain a few frames so the last one is as recent as possible.
+            latest_frame = None
+            for _ in range(4):
+                try:
+                    if hasattr(camera, 'query_image') and not camera.query_image():
+                        pygame.time.wait(25)
+                        continue
+                except Exception:
+                    # Ignore query support errors and fall back to direct get_image.
+                    pass
+                latest_frame = camera.get_image()
+                pygame.time.wait(25)
+
+            if latest_frame is None:
+                latest_frame = camera.get_image()
+            return latest_frame
+
+        def grab_fresh_frame_cv2(cap):
+            latest = None
+            for _ in range(4):
+                ret, frame = cap.read()
+                if ret and frame is not None and frame.size > 0:
+                    latest = frame
+                pygame.time.wait(20)
+            return latest
+
+        max_attempts = 3
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                ensure_camera_session(prewarm=False)
+                with camera_lock:
+                    if camera_session['camera'] is None or not camera_session['started']:
+                        raise RuntimeError('Camera session is not active')
+                    provider = camera_session.get('provider')
+                    if provider == 'cv2':
+                        frame = grab_fresh_frame_cv2(camera_session['camera'])
+                    else:
+                        frame = grab_fresh_frame_pygame(camera_session['camera'])
+
+                if provider == 'cv2':
+                    if frame is None:
+                        raise RuntimeError('Camera returned no frame')
+                    import cv2
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    image = Image.fromarray(frame_rgb)
+                else:
+                    if frame is None:
+                        raise RuntimeError('Camera returned no frame')
+                    frame_np = pygame.surfarray.array3d(frame)
+                    if frame_np is None or frame_np.size == 0:
+                        raise RuntimeError('Camera returned an empty frame')
+                    frame_np = np.transpose(frame_np, (1, 0, 2))
+                    image = Image.fromarray(frame_np)
+
+                max_width = 1280
+                if image.size[0] > max_width:
+                    ratio = max_width / float(image.size[0])
+                    new_height = int(image.size[1] * ratio)
+                    image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+                image.save(filename, 'JPEG', quality=70, optimize=True)
+                shutter_sound.play()
+                return 'file:' + filename
+            except Exception as e:
+                last_error = e
+                print(f'Camera capture retry {attempt}/{max_attempts} failed: {e}')
+                release_camera_session()
+                if attempt < max_attempts:
+                    try:
+                        ensure_camera_session(prewarm=True)
+                    except Exception as reopen_error:
+                        print(f'Camera reopen failed after retry {attempt}: {reopen_error}')
+
+        print(f'Camera capture failed ({last_error}), fallback to screenshot.')
         return screenshot()
+
+    def queue_vision_upload_for_next_turn():
+        if not context['vision_mode']:
+            return
+        if context['upload_file']:
+            # Preserve existing pending upload from other APIs.
+            return
+
+        try:
+            vision_path = camera_shot() if not context['vision_mode_camrea_is_screen'] else screenshot()
+            if vision_path.startswith('file:'):
+                context['upload_file'] = llmAI.upload_file(
+                    vision_path.split(':', maxsplit=1)[1],
+                    display_name='Vision'
+                )
+        except Exception as e:
+            print(f'Vision capture failed in voice thread: {e}')
 
     def exec_code(code:str):
         try:
@@ -499,15 +728,16 @@ Response format:
                         # In case change in the middle
                         if not context['freetalk']:
                             voice_on_sound.play()
-                            with wdt_feed_transcribe:
-                                voice_recognition.start_listen()
+                            voice_recognition.start_listen()
 
-                                evt_enter.wait()
-                                evt_enter.clear()
-                                
-                                voice_off_sound.play()
+                            evt_enter.wait()
+                            evt_enter.clear()
+                            
+                            voice_off_sound.play()
 
-                                temp_text = voice_recognition.stop_listen()
+                            queue_vision_upload_for_next_turn()
+
+                            temp_text = voice_recognition.stop_listen()
 
                             voice_embed = voice_recognition.generate_embed(voice_recognition.recorder.audio)
                             closest_similarity = 0
@@ -535,8 +765,7 @@ Response format:
                         if context['sleep']:
                             # It is sleeping, we detect if the name appears in the text to exit sleep
                             if not temp_text:
-                                with wdt_feed_transcribe:
-                                    temp_text = voice_recognition.transcribe_voice()
+                                temp_text = voice_recognition.transcribe_voice()
                                 print('Sleeping:', temp_text)
                             if config['ai_name'] in temp_text:
                                 print('Exit sleep')
@@ -559,8 +788,8 @@ Response format:
 
                             if (closest_similarity > verify_threshold) and (not text_to_speech.stream.is_still_playing() or  (text_to_speech.stream.is_still_playing() and len(voice_recognition.recorder.audio) > voice_recognition.recorder.sample_rate * 2)):    # Only transcribe sentence which is > 2 seconds long when it is talking, ignore small fragments
                                 if not temp_text:
-                                    with wdt_feed_transcribe:
-                                        temp_text = voice_recognition.transcribe_voice()
+                                    queue_vision_upload_for_next_turn()
+                                    temp_text = voice_recognition.transcribe_voice()
 
                                 text = f'**{closest_user}:**{temp_text}'
                                 voice_off_sound.play()
@@ -572,8 +801,8 @@ Response format:
                                 # do the AI_NAME match only when it is not talking and record length > 2sec, as this consumes GPU resource
                                 if not text_to_speech.stream.is_still_playing() and len(voice_recognition.recorder.audio) > voice_recognition.recorder.sample_rate * 2:
                                     if not temp_text:
-                                        with wdt_feed_transcribe:
-                                            temp_text = voice_recognition.transcribe_voice()
+                                        queue_vision_upload_for_next_turn()
+                                        temp_text = voice_recognition.transcribe_voice()
                                     print(temp_text)
                                     if (config['ai_name'] in temp_text) or ('to meet you' in temp_text):
                                         print('Update guest embedding')
@@ -587,8 +816,8 @@ Response format:
                                     print('guest similarity:', guest_similarity)
                                     if guest_similarity > verify_threshold:
                                         if not temp_text:
-                                            with wdt_feed_transcribe:
-                                                temp_text = voice_recognition.transcribe_voice()
+                                            queue_vision_upload_for_next_turn()
+                                            temp_text = voice_recognition.transcribe_voice()
                                         text = f'**Guest:**{temp_text}'
                                         voice_off_sound.play()
                     if text:
@@ -679,14 +908,6 @@ Response format:
                     parts.append(context['upload_file'])
                     context['upload_file'] = None
 
-                if context['vision_mode']:
-                    try:
-                        vision_path = camera_shot() if not context['vision_mode_camrea_is_screen'] else screenshot()
-                        if vision_path.startswith('file:'):
-                            parts.append(llmAI.upload_file(vision_path.split(':', maxsplit=1)[1], display_name='Vision'))
-                    except Exception as e:
-                        print(f'Vision capture failed: {e}')
-
                 parts.append(text)
                 #timestamp = datetime.now().strftime("%H:%M:%S")
                 #parts.append(f'**System:**{timestamp}')
@@ -703,8 +924,7 @@ Response format:
                     print(f'(Exception: {e})')
                 
                 # Stop speaking
-                with wdt_feed_synthesize:
-                    text_to_speech.stop()
+                text_to_speech.stop()
                 responseTextContainer = ['']
                 def responseAnalyzeAndSpeak(response):
                     # need to filter out ```` code blocks

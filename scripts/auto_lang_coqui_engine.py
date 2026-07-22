@@ -885,7 +885,12 @@ class AutoLangCoquiEngine(BaseEngine):
         with self._synthesize_lock:
             self.send_command('sync', None)
 
-            _, _ = self.parent_synthesize_pipe.recv()
+            # Drain any stale synthesis responses that may still be buffered
+            # in the pipe before the worker's sync acknowledgement arrives.
+            while True:
+                status, _ = self.parent_synthesize_pipe.recv()
+                if status == 'synced':
+                    break
         # if we received the response, means the echo command is processed, we are now synchronized with the remote process
 
     @staticmethod

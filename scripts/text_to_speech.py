@@ -58,6 +58,8 @@ class TextToSpeech:
         with self.mSpeakQueue.mutex:
             self.mSpeakQueue.queue.clear()
         self.stream.stop()
+        with self.mSpeakQueue.mutex:
+            self.mSpeakQueue.queue.clear()
 
     def feed(self, text:str):
         self.stream.check_player()

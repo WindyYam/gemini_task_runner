@@ -237,6 +237,11 @@ class TextStreamToAudioStream:
         except Exception as exc:
             logging.warning(f"engine sync failed during stop: {exc}")
 
+        # Clear again after sync to drop any chunks enqueued while waiting
+        # for the synchronization barrier.
+        self._clear_queue(self.sentence_queue)
+        self._clear_queue(self.engine.queue)
+
         with self._audio_stream_lock:
             if self._audio_stream and self._audio_stream.is_active():
                 self._audio_stream.stop_stream()

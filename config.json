@@ -8,7 +8,7 @@
   "target_camera": "DroidCam Video",
   "recorder_device": null,
   "speaker_device": null,
-  "voice_similarity_threshold": 0.72,
+  "voice_similarity_threshold": 0.65,
   "allow_record_during_speaking": false,
   "dynamic_update_user_embedding": true
 }

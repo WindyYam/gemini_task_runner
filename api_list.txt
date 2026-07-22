@@ -111,7 +111,7 @@ play_alarm_sound()
 # only use this on a schedule event or any callback function.
 play_text_voice(text:str)
 
-# search and play the music with "name" in spotify, always use raw triple quotes """ for the text. If it doesn't work, remind the user to try close all Chrome instance.
+# search and play music with "name" in YouTube Music, always use raw triple quotes """ for the text. If it doesn't work, remind the user to try close all Chrome instance.
 play_music(name:str)
 
 # play the next music track

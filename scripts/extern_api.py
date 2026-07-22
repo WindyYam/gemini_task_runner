@@ -171,7 +171,7 @@ def check_browser():
         try:
             from browser import Browser
         
-            # spotify player
+            # YouTube Music player
             player = Browser(
                 user_data_dir=USER_CHROME_DATA_PATH,
                 profile_directory=PROFILE_DIR,

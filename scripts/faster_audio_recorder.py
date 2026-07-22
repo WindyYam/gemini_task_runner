@@ -38,7 +38,7 @@ class FasterAudioRecorder:
         input_device_index=None,
         on_recording_start=None,
         sample_rate=16000,
-        chunk_size=1024,
+        chunk_size=512,
         **kwargs,
     ):
         del spinner, silero_use_onnx, webrtc_sensitivity, min_gap_between_recordings, kwargs
@@ -97,12 +97,17 @@ class FasterAudioRecorder:
         self._transcribe_thread = threading.Thread(target=self._transcribe_worker, daemon=True)
         self._transcribe_thread.start()
 
+        # Warm up model eagerly so first utterance does not pay model init cost.
+        self._warmup_thread = threading.Thread(target=self._warmup_transcriber, daemon=True)
+        self._warmup_thread.start()
+
         self._job_id = 0
         self._session_id = 0
         self._latest_preview = {}
         self._current_final_job_id = None
         self._current_session_id = None
         self._prefetched_text = None
+        self._latest_requested_job_id = None
 
     def _set_state(self, state: str):
         self._state = state
@@ -233,11 +238,36 @@ class FasterAudioRecorder:
             self._whisper_model = WhisperModel(self.model_name, compute_type=self.compute_type)
         return self._whisper_model
 
-    def _submit_transcribe_job(self, audio_np: np.ndarray, session_id: int, is_preview: bool) -> int:
+    def _warmup_transcriber(self):
+        try:
+            self._get_whisper_model()
+        except Exception as exc:
+            logging.warning(f"transcriber warmup failed: {exc}")
+
+    def _drop_pending_jobs(self):
+        while True:
+            try:
+                item = self._transcribe_jobs.get_nowait()
+                if item is None:
+                    self._transcribe_jobs.put(None)
+                    break
+            except queue.Empty:
+                break
+
+    def _submit_transcribe_job(
+        self,
+        audio_np: np.ndarray,
+        session_id: int,
+        is_preview: bool,
+        replace_pending: bool = False,
+    ) -> int:
+        if replace_pending:
+            self._drop_pending_jobs()
         with self._transcribe_lock:
             self._job_id += 1
             jid = self._job_id
         self._transcribe_jobs.put((jid, session_id, is_preview, audio_np.copy()))
+        self._latest_requested_job_id = jid
         return jid
 
     def _transcribe_worker(self):
@@ -291,6 +321,7 @@ class FasterAudioRecorder:
         self.audio = np.array([], dtype=np.float32)
         self._prefetched_text = None
         self._current_final_job_id = None
+        self._latest_requested_job_id = None
         self._session_id += 1
         self._current_session_id = self._session_id
 
@@ -339,7 +370,12 @@ class FasterAudioRecorder:
                 if not preview_submitted_in_current_silence:
                     audio_i16 = np.frombuffer(b"".join(self.frames), dtype=np.int16)
                     audio_np = audio_i16.astype(np.float32) / INT16_MAX_ABS_VALUE
-                    self._submit_transcribe_job(audio_np, self._current_session_id, is_preview=True)
+                    self._submit_transcribe_job(
+                        audio_np,
+                        self._current_session_id,
+                        is_preview=True,
+                        replace_pending=True,
+                    )
                     preview_submitted_in_current_silence = True
 
                 if consecutive_silence >= end_silence_frames:
@@ -347,13 +383,10 @@ class FasterAudioRecorder:
             else:
                 consecutive_silence = 0
                 preview_submitted_in_current_silence = False
+                # User resumed speaking, discard stale queued preview tasks.
+                self._drop_pending_jobs()
 
         self._finalize_frames(self.frames)
-
-        # Final async pass starts before transcribe() is called.
-        self._current_final_job_id = self._submit_transcribe_job(
-            self.audio, self._current_session_id, is_preview=False
-        )
 
         preview = self._latest_preview.get(self._current_session_id)
         if preview:
@@ -378,24 +411,25 @@ class FasterAudioRecorder:
                 self.last_transcription_bytes = self.audio.copy()
                 return self._prefetched_text
 
-            # Reuse final async result if available soon.
-            if self._current_final_job_id is not None:
-                with self._transcribe_cv:
-                    deadline = time.time() + 3.0
-                    while self._current_final_job_id not in self._transcribe_results and time.time() < deadline:
-                        self._transcribe_cv.wait(timeout=0.05)
+            # Original-like behavior: wait for the latest silence-triggered async job.
+            # If none exists, submit current audio once and wait for it.
+            if self._latest_requested_job_id is None:
+                self._latest_requested_job_id = self._submit_transcribe_job(
+                    self.audio,
+                    self._current_session_id or 0,
+                    is_preview=False,
+                    replace_pending=True,
+                )
 
-                    result = self._transcribe_results.get(self._current_final_job_id)
-                    if result and result.get("text"):
-                        self.last_transcription_bytes = self.audio.copy()
-                        return result["text"]
+            target_job_id = self._latest_requested_job_id
+            with self._transcribe_cv:
+                while target_job_id not in self._transcribe_results:
+                    self._transcribe_cv.wait(timeout=0.05)
 
-            # Fallback sync path.
-            model = self._get_whisper_model()
-            segments, _ = model.transcribe(self.audio, language=self.language)
-            text = " ".join(segment.text for segment in segments)
+                result = self._transcribe_results.get(target_job_id, {})
+
             self.last_transcription_bytes = self.audio.copy()
-            return self._preprocess_output(text)
+            return self._preprocess_output(result.get("text", ""))
         finally:
             self._set_state("inactive")
 

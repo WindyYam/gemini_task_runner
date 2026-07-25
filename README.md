@@ -66,6 +66,35 @@ Added: You might also need to install cuDNN for some libraries if you encounter 
 4. Run `run.bat`. Make sure you've GEMINI_API_KEY variable in step 1.
 5. When using Chrome related features(such as playing YouTube Music, navigate webpage), make sure you have Google Chrome installed, YouTube Music accessible in Chrome, and Chrome is closed before doing AI Chrome features.
 
+### Web Chat Mode (LAN)
+
+You now have a second way to use the assistant from devices in your local network through a browser UI.
+This web server is a frontend process only. It forwards requests to the existing chatbot loop in `scripts/main.py`, so all existing behavior (history, code execution, memory, APIs) stays in one backend.
+
+1. Start the main assistant with `run.bat`.
+2. Ask the assistant to start web mode by calling:
+  `start_web_chat_server(host="0.0.0.0", port=8765, prefix="Master")`
+  (or run `run_web.bat` in another terminal after main is already running)
+3. Open `http://YOUR_PC_LAN_IP:8765` from another device on the same network.
+4. Use text chat directly in the page.
+5. Use voice chat with the **Start Voice** button (browser speech recognition + browser speech playback).
+6. Set your own chat name prefix in the top input (for example `Master`, `Guest`, `Alex`).
+
+Bot voice in web mode now uses the backend chatbot TTS stream (WebSocket audio), not browser TTS.
+
+- Turn on `Bot Voice` in the web UI to request backend voice output for web chat turns.
+- On mobile browsers, tap a UI button first (for example `Bot Voice` or `Start Voice`) so audio playback is allowed by browser autoplay policy.
+- Audio stream endpoint is served from the backend on `web_audio_ws_port` (default `8790`).
+
+Related config fields in `config.json`:
+- `web_host`
+- `web_default_prefix`
+- `web_ipc_host`
+- `web_ipc_port`
+- `web_ipc_auth`
+- `web_audio_ws_host`
+- `web_audio_ws_port`
+
 ### Modes
 
 - **Free Talk Mode** (Default): The companion listens continuously for commands.

@@ -2,3 +2,4 @@
 /.venv
 /models
 /Chrome_User_Data
+/scripts/__pycache__

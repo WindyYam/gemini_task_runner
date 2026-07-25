@@ -54,5 +54,8 @@ class VoiceRecognition:
     def transcribe_voice(self) -> str:
         return self.recorder.transcribe()
 
+    def transcribe_external_audio(self, audio, sample_rate: int) -> str:
+        return self.recorder.transcribe_external_audio(audio, sample_rate)
+
     def listen(self):
         self.recorder.wait_audio()

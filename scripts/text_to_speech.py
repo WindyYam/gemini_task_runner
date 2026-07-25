@@ -1,7 +1,6 @@
 import queue
 import os
 import wave
-import pygame
 import numpy as np
 import pyaudio
 from auto_lang_coqui_engine import AutoLangCoquiEngine
@@ -44,9 +43,6 @@ class TextToSpeech:
         else:
             print('Setting Speaker: ', audio.get_default_output_device_info().get('name'))
         self.stream = TextStreamToAudioStream(self.eng, output_device_index=device_index)
-        
-        self.vader_breath = pygame.mixer.Sound(f"{voice_path}breathing.mp3")
-        self.vader_breath.set_volume(0.1)
 
         def iterator():
             while True:
@@ -66,8 +62,13 @@ class TextToSpeech:
         text = text.replace('*', ' ')
         self.mSpeakQueue.put(text)
 
+    def add_audio_listener(self, callback):
+        self.stream.add_audio_listener(callback)
+
+    def remove_audio_listener(self, callback):
+        self.stream.remove_audio_listener(callback)
+
     def switch_user_voice(self, audio):
-        self.vader_breath.stop()
         samplerate = 16000
         audio = audio / np.max(np.abs(audio))
         audio = (audio * (2 ** 15 - 1)).astype(np.int16)
@@ -82,25 +83,19 @@ class TextToSpeech:
         self.eng.set_voice(voice=self.MIMIC_VOICE)
 
     def switch_default_mode(self):
-        self.vader_breath.stop()
         self.eng.set_voice(voice=self.DEFAULT_VOICE)
 
     def switch_trump_mode(self):
-        self.vader_breath.stop()
         self.eng.set_voice(voice=self.TRUMP_VOICE)
     
     def switch_biden_mode(self):
-        self.vader_breath.stop()
         self.eng.set_voice(voice=self.BIDEN_VOICE)
 
     def switch_vader_mode(self):
-        self.vader_breath.play(-1)
         self.eng.set_voice(voice=self.VADER_VOICE)
     
     def switch_robot_mode(self):
-        self.vader_breath.stop()
         self.eng.set_voice(voice=self.ROBOT_VOICE)
 
     def switch_female_mode(self):
-        self.vader_breath.stop()
         self.eng.set_voice(voice=self.FEMALE_VOICE)

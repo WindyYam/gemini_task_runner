@@ -22,6 +22,8 @@ class TextStreamToAudioStream:
         self._pyaudio = pyaudio.PyAudio()
         self._audio_stream = None
         self._audio_stream_lock = threading.Lock()
+        self._audio_listener_lock = threading.Lock()
+        self._audio_listeners = []
 
         self._shutdown_event = threading.Event()
         self._paused_event = threading.Event()
@@ -179,6 +181,13 @@ class TextStreamToAudioStream:
                 self._ensure_audio_stream_started()
                 raw = self._to_bytes(chunk)
                 if raw:
+                    with self._audio_listener_lock:
+                        listeners = list(self._audio_listeners)
+                    for callback in listeners:
+                        try:
+                            callback(raw)
+                        except Exception as exc:
+                            logging.warning(f"audio listener failed: {exc}")
                     self._audio_stream.write(raw)
             except Exception as exc:
                 logging.warning(f"audio playback failed: {exc}")
@@ -226,6 +235,15 @@ class TextStreamToAudioStream:
     def check_player(self):
         self._paused_event.clear()
         self._ensure_audio_stream_started()
+
+    def add_audio_listener(self, callback):
+        with self._audio_listener_lock:
+            if callback not in self._audio_listeners:
+                self._audio_listeners.append(callback)
+
+    def remove_audio_listener(self, callback):
+        with self._audio_listener_lock:
+            self._audio_listeners = [cb for cb in self._audio_listeners if cb != callback]
 
     def stop(self):
         self._paused_event.set()

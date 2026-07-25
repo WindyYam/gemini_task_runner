@@ -14,3 +14,4 @@ opencv-python==4.10.0.84
 numpy==1.26.4
 ddgs==9.6.1
 transformers==4.40.2
+websockets==12.0

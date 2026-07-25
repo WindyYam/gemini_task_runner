@@ -433,6 +433,39 @@ class FasterAudioRecorder:
         finally:
             self._set_state("inactive")
 
+    def transcribe_external_audio(self, audio_np: np.ndarray, sample_rate: int) -> str:
+        """Transcribe externally captured audio using the same recorder model path.
+
+        This lets remote microphone streams reuse the same backend transcriber
+        configuration as local microphone input.
+        """
+        self._set_state("transcribing")
+        try:
+            if audio_np is None:
+                return ""
+
+            audio_f32 = np.asarray(audio_np, dtype=np.float32)
+            if audio_f32.ndim > 1:
+                audio_f32 = audio_f32.mean(axis=1, dtype=np.float32)
+
+            src_rate = int(sample_rate or self.sample_rate)
+            if src_rate != self.sample_rate and audio_f32.size > 1:
+                target_len = max(1, int(round(audio_f32.size * float(self.sample_rate) / float(src_rate))))
+                src_idx = np.arange(audio_f32.size, dtype=np.float32)
+                dst_idx = np.linspace(0, audio_f32.size - 1, target_len, dtype=np.float32)
+                audio_f32 = np.interp(dst_idx, src_idx, audio_f32).astype(np.float32, copy=False)
+
+            min_samples = int(self.min_length_of_recording * self.sample_rate)
+            if audio_f32.size < min_samples:
+                return ""
+
+            model = self._get_whisper_model()
+            segments, _ = model.transcribe(audio_f32, language=self.language)
+            text = " ".join(segment.text for segment in segments)
+            return self._preprocess_output(text)
+        finally:
+            self._set_state("inactive")
+
     def set_recording_judger(self, judger):
         self.recording_judger = judger
 
